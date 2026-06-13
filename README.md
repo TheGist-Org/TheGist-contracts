@@ -1,126 +1,146 @@
-# GistPin Contracts
+# TheGist Contracts
 
-This repo contains the **on-chain logic** for GistPin, implemented as
-Soroban smart contracts in Rust.
+Soroban smart contracts in Rust — the core on-chain logic of the TheGist protocol.
 
-Core responsibilities:
-
-- Register gists as on-chain records
-- Index gists by coarse location cell
-- Provide verifiable metadata for off-chain indexers
-- Future: on-chain tipping, staking, and moderation primitives
+Every gist posted through TheGist is anchored here. No backend can forge, censor, or silently delete a record stored in these contracts.
 
 ---
 
-## Tech Stack
+## Contracts
 
-- **Language**: Rust
-- **Smart contracts**: Soroban SDK
-- **Tooling**:
-  - `soroban-cli` for building, deploying, and invoking contracts
-  - `cargo` for Rust builds and tests
+### GistRegistry
+
+The primary contract. Every gist posted to TheGist is an entry in the GistRegistry.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `gist_id` | `u64` | Auto-incrementing on-chain ID |
+| `ipfs_cid` | `Bytes` | IPFS content identifier for the gist body |
+| `geohash` | `String` | Geohash at precision 7 (~150m × 150m cell) |
+| `author` | `Address` | Stellar address of the signing keypair |
+| `timestamp` | `u64` | Ledger timestamp at submission |
+| `expiry` | `u64` | Expiry timestamp (default: 24h from post) |
+
+All writes require a valid Stellar signature. The contract emits a `GistPosted` event on every successful write, which the indexer (TheGist-API) consumes.
 
 ---
 
-## Project Layout
+### GistVault
+
+An optional tipping vault. Users can send XLM tips to gist authors anonymously via Soroban escrow — no direct wallet-to-wallet transfer required. The author can withdraw accumulated tips at any time. The sender's identity is not linked to the recipient's identity on-chain beyond the transaction itself.
+
+---
+
+### LocationVerifier
+
+Validates that a submitted geohash falls within an allowed geographic boundary. Used to enforce region-scoped deployments or to prevent spam from coordinates that don't correspond to real locations. Boundary definitions are stored as contract data and can be updated by the contract admin.
+
+---
+
+## Prerequisites
+
+- **Rust** — [rustup.rs](https://rustup.rs)
+- **wasm32 target**: `rustup target add wasm32-unknown-unknown`
+- **Soroban CLI**: `cargo install --locked stellar-cli --features opt`
+
+---
+
+## Build
 
 ```bash
-gistpin-contracts/
-  ├─ src/
-  │   └─ lib.rs          # Main contract implementation (GistRegistry, etc.)
-  ├─ tests/              # Contract unit / integration tests
-  ├─ Cargo.toml
-  └─ README.md
+cargo build --target wasm32-unknown-unknown --release
 ```
 
-We may later split multiple contracts into separate crates if needed
-(e.g. gistpin-tipping, gistpin-moderation).
+Compiled `.wasm` artifacts are output to `target/wasm32-unknown-unknown/release/`.
 
-Contract Overview
-GistRegistry (MVP)
+---
 
-Minimal data model:
-
-• gistid: u64
-• author: Option<Address>
-• locationcell: u64 (coarse geospatial cell, e.g., geohash/S2-based)
-• contenthash: Bytes (IPFS/Arweave CID)
-• createdat: u64 (timestamp / ledger sequence)
-
-Core methods (subject to evolution):
-
-• postgist(author, locationcell, contenthash) -> u64
-• getgist(gistid) -> GistRecord
-• listgistsbycell(locationcell, cursor, limit) -> (Vec<GistRecord>, cursor)
-
-Prerequisites
-• Rust toolchain: rustup default stable
-• Soroban CLI:
-  - Install per official docs, e.g.:
-    
-    ```bash
-    cargo install soroban-cli --locked
-    ```
-
-Local Development
-Clone the repo
-
-```bash
-git clone https://github.com/gistpin/gistpin-contracts.git
-cd gistpin-contracts
-```
-
-Build
-
-```bash
-cargo build
-```
-
-Test
+## Test
 
 ```bash
 cargo test
 ```
 
-Run on a local Soroban network
+Unit and integration tests live in `tests/`. All new contract logic must be covered before opening a PR.
 
-Start a local network (check Soroban docs, example):
+---
 
-```bash
-soroban local network start
-```
-
-Deploy contract (example):
+## Deploy to Soroban Testnet
 
 ```bash
-soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/gistpincontracts.wasm \
-  --id gistpin-registry \
-  --network local
+# Configure the testnet network
+stellar network add testnet \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --network-passphrase "Test SDF Network ; September 2015"
+
+# Fund a test identity
+stellar keys generate --global alice
+stellar keys fund alice --network testnet
+
+# Deploy GistRegistry
+stellar contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/gist_registry.wasm \
+  --source alice \
+  --network testnet
+
+# Deploy GistVault
+stellar contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/gist_vault.wasm \
+  --source alice \
+  --network testnet
+
+# Deploy LocationVerifier
+stellar contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/location_verifier.wasm \
+  --source alice \
+  --network testnet
 ```
 
-Invoke methods (example):
+Each command outputs a contract ID. Copy these into the `TheGist-API` `.env` and the web/mobile client environment variables.
 
-```bash
-soroban contract invoke \
-  --id gistpin-registry \
-  --network local \
-  -- \
-  postgist \
-  --author <ADDRESSORNONE> \
-  --locationcell 123456789 \
-  --contenthash "bafybeihash..."
+---
+
+## Contract Addresses (Testnet)
+
+| Contract | Address |
+|----------|---------|
+| GistRegistry | `TBD` |
+| GistVault | `TBD` |
+| LocationVerifier | `TBD` |
+
+> These will be populated after the initial testnet deployment.
+
+---
+
+## Project Layout
+
+```
+TheGist-contracts/
+├── src/
+│   ├── gist_registry.rs     # GistRegistry contract
+│   ├── gist_vault.rs        # GistVault tipping contract
+│   ├── location_verifier.rs # LocationVerifier contract
+│   └── lib.rs               # Crate root
+├── tests/
+│   ├── gist_registry_test.rs
+│   ├── gist_vault_test.rs
+│   └── location_verifier_test.rs
+├── Cargo.toml
+└── README.md
 ```
 
-We will document exact CLI commands and contract IDs as they stabilize.
+---
 
-Contribution Guidelines
-• If you are changing contract interfaces, open an issue first and link to
-  the relevant design doc (in gistpin-meta).
-• Keep public functions as small, explicit, and documented as possible.
-• Cover new logic with tests in tests/.
+## Contributing
 
-For general contribution rules, see the global
-CONTRIBUTING.md.
-`
+- If you are changing a public contract interface, open an issue in [theGist-Meta](https://github.com/TheGist-Org/theGist-Meta) before implementing — interface changes affect every client.
+- All new behaviour must have test coverage in `tests/`.
+- Keep contract functions small, explicit, and free of unnecessary state.
 
+For global contribution rules, see [CONTRIBUTING.md](https://github.com/TheGist-Org/theGist-Meta/blob/main/CONTRIBUTING.md).
+
+---
+
+## License
+
+MIT
