@@ -26,6 +26,6 @@ impl LocationVerifier {
     /// Get current boundary definitions
     pub fn get_boundaries(env: Env) -> String {
         // Placeholder for boundary query
-        String::from_slice(&env, b"{}")
+        String::from_slice(&env, "{}")
     }
 }
