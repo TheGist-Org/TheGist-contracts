@@ -25,6 +25,6 @@ impl GistVault {
     /// Get tip balance for an author
     pub fn get_tip_balance(env: Env, author: Address) -> U256 {
         // Placeholder for balance query
-        U256::from(&env, 0)
+        U256::from_u128(&env, 0)
     }
 }
