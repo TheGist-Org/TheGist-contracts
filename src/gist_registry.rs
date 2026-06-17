@@ -163,6 +163,22 @@ impl GistRegistry {
     ) -> u64 {
         author.require_auth();
 
+        if ipfs_cid.len() == 0 {
+            panic!("ipfs_cid cannot be empty");
+        }
+        if geohash.len() != 7 {
+            panic!("geohash must be exactly 7 characters");
+        }
+
+        let timestamp = env.ledger().timestamp();
+        let resolved_expiry = expiry.unwrap_or(timestamp + 86400);
+        if resolved_expiry <= timestamp {
+            panic!("expiry must be in the future");
+        }
+        if resolved_expiry > timestamp + 604800 {
+            panic!("expiry cannot exceed 168 hours from now");
+        }
+
         let gist_id: u64 = env
             .storage()
             .instance()
@@ -171,8 +187,7 @@ impl GistRegistry {
         let new_gist_id = gist_id.checked_add(1).unwrap();
         env.storage().instance().set(&DataKey::GistCount, &new_gist_id);
 
-        let timestamp = env.ledger().timestamp();
-        let expiry = expiry.unwrap_or(timestamp + 86400);
+        let expiry = resolved_expiry;
 
         let gist = Gist {
             gist_id: new_gist_id,
