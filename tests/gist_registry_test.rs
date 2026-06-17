@@ -92,9 +92,84 @@ fn test_get_gists_by_author() {
     client.post_gist(&ipfs_cid, &geohash, &author2, &None);
     client.post_gist(&ipfs_cid, &geohash, &author1, &None);
 
-    // Get gists by author1
-    let author1_gists = client.get_gists_by_author(&author1);
+    // Get gists by author1 with limit/offset
+    let author1_gists = client.get_gists_by_author(&author1, &10u32, &0u32);
     assert_eq!(author1_gists.len(), 2);
+}
+
+#[test]
+fn test_get_gists_by_author_pagination() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, GistRegistry);
+    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+
+    let author = Address::generate(&env);
+    let other = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_slice(&env, "u4pruyd");
+
+    // Post 5 gists from author, 1 from other
+    for _ in 0..5 {
+        client.post_gist(&ipfs_cid, &geohash, &author, &None);
+    }
+    client.post_gist(&ipfs_cid, &geohash, &other, &None);
+
+    // First page: limit 2, offset 0 → gist ids 1, 2
+    let page1 = client.get_gists_by_author(&author, &2u32, &0u32);
+    assert_eq!(page1.len(), 2);
+    assert_eq!(page1.get(0).unwrap(), 1u64);
+    assert_eq!(page1.get(1).unwrap(), 2u64);
+
+    // Second page: limit 2, offset 2 → gist ids 3, 4
+    let page2 = client.get_gists_by_author(&author, &2u32, &2u32);
+    assert_eq!(page2.len(), 2);
+    assert_eq!(page2.get(0).unwrap(), 3u64);
+    assert_eq!(page2.get(1).unwrap(), 4u64);
+
+    // Third page: limit 2, offset 4 → gist id 5 only
+    let page3 = client.get_gists_by_author(&author, &2u32, &4u32);
+    assert_eq!(page3.len(), 1);
+    assert_eq!(page3.get(0).unwrap(), 5u64);
+}
+
+#[test]
+#[should_panic(expected = "limit exceeds maximum of 50")]
+fn test_get_gists_by_author_limit_exceeded_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, GistRegistry);
+    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+
+    let author = Address::generate(&env);
+    client.get_gists_by_author(&author, &51u32, &0u32);
+}
+
+#[test]
+fn test_get_active_gist_count() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, GistRegistry);
+    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+
+    let author = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_slice(&env, "u4pruyd");
+
+    client.initialize(&admin);
+
+    let id1 = client.post_gist(&ipfs_cid, &geohash, &author, &None);
+    let id2 = client.post_gist(&ipfs_cid, &geohash, &author, &None);
+    let _id3 = client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    assert_eq!(client.get_active_gist_count(), 3);
+
+    // Expire two gists
+    client.expire_gist(&author, &id1);
+    client.admin_expire_gist(&admin, &id2);
+
+    assert_eq!(client.get_active_gist_count(), 1);
 }
 
 #[test]
