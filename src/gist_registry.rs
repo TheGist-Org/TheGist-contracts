@@ -202,17 +202,42 @@ impl GistRegistry {
         env.storage().instance().get(&DataKey::GistCount).unwrap_or(0u64)
     }
 
-    pub fn get_gists_by_author(env: Env, author: Address) -> Vec<u64> {
+    pub fn get_gists_by_author(env: Env, author: Address, limit: u32, offset: u32) -> Vec<u64> {
+        if limit > 50 {
+            panic!("limit exceeds maximum of 50");
+        }
         let count = Self::get_gist_count(env.clone());
         let mut result = Vec::new(&env);
+        let mut skipped: u32 = 0;
         for id in 1..=count {
+            if result.len() as u32 >= limit {
+                break;
+            }
             if let Some(gist) = Self::get_gist(env.clone(), id) {
                 if gist.author == author {
-                    result.push_back(id);
+                    if skipped < offset {
+                        skipped += 1;
+                    } else {
+                        result.push_back(id);
+                    }
                 }
             }
         }
         result
+    }
+
+    pub fn get_active_gist_count(env: Env) -> u64 {
+        let count = Self::get_gist_count(env.clone());
+        let now = env.ledger().timestamp();
+        let mut active: u64 = 0;
+        for id in 1..=count {
+            if let Some(gist) = Self::get_gist(env.clone(), id) {
+                if gist.is_active && gist.expiry > now {
+                    active += 1;
+                }
+            }
+        }
+        active
     }
 
     pub fn get_gists_by_geohash(env: Env, geohash_prefix: String) -> Vec<u64> {
