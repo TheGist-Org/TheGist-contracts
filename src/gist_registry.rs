@@ -51,6 +51,10 @@ impl GistRegistry {
         env.storage().instance().get(&DataKey::Admin)
     }
 
+    pub fn get_version(_: Env) -> u32 {
+        1
+    }
+
     /// Transfer admin role; requires current admin's auth.
     pub fn set_admin(env: Env, current_admin: Address, new_admin: Address) {
         current_admin.require_auth();

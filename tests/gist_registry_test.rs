@@ -1,6 +1,6 @@
 use soroban_sdk::{vec, Address, Bytes, Env, String};
 use soroban_sdk::testutils::Address as _;
-use the_gist_contracts::{Gist, GistRegistry};
+use the_gist_contracts::GistRegistry;
 
 #[test]
 fn test_initialize() {
