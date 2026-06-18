@@ -1,6 +1,7 @@
 use soroban_sdk::{vec, Address, Bytes, Env, String};
 use soroban_sdk::testutils::Address as _;
-use the_gist_contracts::{Gist, GistRegistry};
+use soroban_sdk::testutils::storage::{Instance as _, Temporary as _};
+use the_gist_contracts::GistRegistry;
 
 #[test]
 fn test_initialize() {
@@ -37,6 +38,31 @@ fn test_post_gist() {
     assert_eq!(gist.ipfs_cid, ipfs_cid);
     assert_eq!(gist.geohash, geohash);
     assert_eq!(gist.author, author);
+}
+
+#[test]
+fn test_post_gist_uses_temporary_storage_and_instance_metadata() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, GistRegistry);
+    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest789");
+    let geohash = String::from_slice(&env, "u4pruyd");
+
+    client.initialize(&admin);
+    let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &Some(24));
+
+    assert_eq!(client.get_contract_version(), 2);
+    env.as_contract(&contract_id, || {
+        assert_eq!(env.storage().instance().all().len(), 3);
+        assert_eq!(env.storage().temporary().all().len(), 2);
+    });
+
+    let gist = client.get_gist(&gist_id).unwrap();
+    assert_eq!(gist.expiry, env.ledger().timestamp() + 86_400);
 }
 
 #[test]
@@ -210,6 +236,48 @@ fn test_custom_expiry() {
 
     let gist = client.get_gist(&gist_id).unwrap();
     assert_eq!(gist.expiry, custom_expiry);
+}
+
+#[test]
+fn test_extend_gist_ttl() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, GistRegistry);
+    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_slice(&env, "u4pruyd");
+
+    let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &Some(24));
+    let original = client.get_gist(&gist_id).unwrap();
+
+    client.extend_gist_ttl(&gist_id);
+
+    let extended = client.get_gist(&gist_id).unwrap();
+    assert_eq!(extended.expiry, original.expiry + 86_400);
+    env.as_contract(&contract_id, || {
+        assert_eq!(env.storage().instance().all().len(), 1);
+        assert_eq!(env.storage().temporary().all().len(), 2);
+    });
+}
+
+#[test]
+#[should_panic]
+fn test_extend_gist_ttl_requires_author_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, GistRegistry);
+    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_slice(&env, "u4pruyd");
+
+    let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &Some(24));
+
+    env.set_auths(&[]);
+    client.extend_gist_ttl(&gist_id);
 }
 
 #[test]
