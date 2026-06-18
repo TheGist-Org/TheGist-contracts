@@ -1,8 +1,7 @@
-use soroban_sdk::{vec, Address, Bytes, Env, String};
-use soroban_sdk::testutils::Address as _;
-use the_gist_contracts::GistRegistry;
 use soroban_sdk::testutils::storage::{Instance as _, Temporary as _};
-use the_gist_contracts::GistRegistry;
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::{vec, Address, Bytes, BytesN, Env, String};
+use the_gist_contracts::{GistRegistry, GistRegistryClient};
 
 // ── initialize / admin ───────────────────────────────────────────────────────
 
@@ -10,7 +9,7 @@ use the_gist_contracts::GistRegistry;
 fn test_initialize() {
     let env = Env::default();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
     assert_eq!(client.get_gist_count(), 0);
 }
 
@@ -18,10 +17,20 @@ fn test_initialize() {
 fn test_initialize_and_get_admin() {
     let env = Env::default();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     client.initialize(&admin);
     assert_eq!(client.get_admin(), Some(admin));
+}
+
+#[test]
+fn test_initialize_sets_version_to_1() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, GistRegistry);
+    let client = GistRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+    assert_eq!(client.get_version(), 1);
 }
 
 #[test]
@@ -29,7 +38,7 @@ fn test_initialize_and_get_admin() {
 fn test_initialize_twice_panics() {
     let env = Env::default();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     client.initialize(&admin);
     client.initialize(&admin);
@@ -40,7 +49,7 @@ fn test_set_admin() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let new_admin = Address::generate(&env);
     client.initialize(&admin);
@@ -54,12 +63,67 @@ fn test_set_admin_wrong_caller_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let impostor = Address::generate(&env);
     let new_admin = Address::generate(&env);
     client.initialize(&admin);
     client.set_admin(&impostor, &new_admin);
+}
+
+// ── upgrade ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_upgrade_increments_version() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, GistRegistry);
+    let client = GistRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+    assert_eq!(client.get_version(), 1);
+
+    // Register a second WASM to use as the upgrade target
+    let new_wasm_hash: BytesN<32> = env
+        .deployer()
+        .upload_contract_wasm(soroban_sdk::xdr::ScBytes::from(vec![0u8; 32].as_slice()));
+    client.upgrade(&admin, &new_wasm_hash);
+    assert_eq!(client.get_version(), 2);
+}
+
+#[test]
+#[should_panic(expected = "caller is not the admin")]
+fn test_upgrade_non_admin_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, GistRegistry);
+    let client = GistRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let impostor = Address::generate(&env);
+    client.initialize(&admin);
+
+    let new_wasm_hash: BytesN<32> = env
+        .deployer()
+        .upload_contract_wasm(soroban_sdk::xdr::ScBytes::from(vec![0u8; 32].as_slice()));
+    client.upgrade(&impostor, &new_wasm_hash);
+}
+
+#[test]
+fn test_upgrade_multiple_times_increments_version() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, GistRegistry);
+    let client = GistRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let wasm_hash: BytesN<32> = env
+        .deployer()
+        .upload_contract_wasm(soroban_sdk::xdr::ScBytes::from(vec![0u8; 32].as_slice()));
+    client.upgrade(&admin, &wasm_hash);
+    client.upgrade(&admin, &wasm_hash);
+    client.upgrade(&admin, &wasm_hash);
+    assert_eq!(client.get_version(), 4);
 }
 
 // ── post_gist – happy path ───────────────────────────────────────────────────
@@ -69,7 +133,7 @@ fn test_post_gist() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
@@ -92,7 +156,7 @@ fn test_post_gist_uses_temporary_storage_and_instance_metadata() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let author = Address::generate(&env);
@@ -102,9 +166,11 @@ fn test_post_gist_uses_temporary_storage_and_instance_metadata() {
     client.initialize(&admin);
     let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &Some(24));
 
-    assert_eq!(client.get_contract_version(), 2);
+    assert_eq!(client.get_version(), 1);
     env.as_contract(&contract_id, || {
+        // Admin + ContractVersion + GistCount = 3 instance keys
         assert_eq!(env.storage().instance().all().len(), 3);
+        // Gist + AuthorGists = 2 temporary keys
         assert_eq!(env.storage().temporary().all().len(), 2);
     });
 
@@ -113,12 +179,11 @@ fn test_post_gist_uses_temporary_storage_and_instance_metadata() {
 }
 
 #[test]
-fn test_post_multiple_gists() {
 fn test_post_gist_id_increments() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let author1 = Address::generate(&env);
     let author2 = Address::generate(&env);
@@ -138,7 +203,7 @@ fn test_post_gist_is_active() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
@@ -152,7 +217,7 @@ fn test_post_gist_custom_expiry() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
@@ -170,7 +235,7 @@ fn test_post_gist_empty_cid_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
     let author = Address::generate(&env);
     let empty_cid = Bytes::from_slice(&env, b"");
     let geohash = String::from_slice(&env, "u4pruyd");
@@ -183,7 +248,7 @@ fn test_post_gist_geohash_too_short_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
     let geohash = String::from_slice(&env, "u4pru");
@@ -196,7 +261,7 @@ fn test_post_gist_geohash_too_long_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
     let geohash = String::from_slice(&env, "u4pruydx");
@@ -209,7 +274,7 @@ fn test_post_gist_expiry_in_past_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
     let geohash = String::from_slice(&env, "u4pruyd");
@@ -223,7 +288,7 @@ fn test_post_gist_expiry_exceeds_max_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
     let geohash = String::from_slice(&env, "u4pruyd");
@@ -237,7 +302,7 @@ fn test_post_gist_expiry_exceeds_max_panics() {
 fn test_get_gist_not_found() {
     let env = Env::default();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
     assert!(client.get_gist(&999).is_none());
 }
 
@@ -248,7 +313,7 @@ fn test_get_gists_by_author() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let author1 = Address::generate(&env);
     let author2 = Address::generate(&env);
@@ -268,7 +333,7 @@ fn test_get_gists_by_author_empty() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let author = Address::generate(&env);
     let other = Address::generate(&env);
@@ -285,7 +350,7 @@ fn test_extend_gist_ttl() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
@@ -310,7 +375,7 @@ fn test_extend_gist_ttl_requires_author_auth() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
@@ -323,12 +388,11 @@ fn test_extend_gist_ttl_requires_author_auth() {
 }
 
 #[test]
-fn test_post_gist_is_active() {
 fn test_get_gists_by_author_pagination() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let author = Address::generate(&env);
     let other = Address::generate(&env);
@@ -361,7 +425,7 @@ fn test_get_gists_by_author_limit_exceeded_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
     let author = Address::generate(&env);
     client.get_gists_by_author(&author, &51u32, &0u32);
 }
@@ -373,7 +437,7 @@ fn test_get_gists_by_geohash() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
@@ -393,7 +457,7 @@ fn test_expire_gist_by_author() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
@@ -411,7 +475,7 @@ fn test_expire_gist_non_author_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let author = Address::generate(&env);
     let other = Address::generate(&env);
@@ -428,7 +492,7 @@ fn test_admin_expire_gist() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let author = Address::generate(&env);
@@ -447,7 +511,7 @@ fn test_admin_expire_gist_wrong_admin_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let impostor = Address::generate(&env);
@@ -466,7 +530,7 @@ fn test_batch_expire() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let author = Address::generate(&env);
@@ -489,7 +553,7 @@ fn test_batch_expire_skips_nonexistent() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let author = Address::generate(&env);
@@ -509,7 +573,7 @@ fn test_batch_expire_exceeds_limit_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     client.initialize(&admin);
@@ -526,7 +590,7 @@ fn test_is_gist_active_true_for_new_gist() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
@@ -540,7 +604,7 @@ fn test_is_gist_active_false_after_expire() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
@@ -554,7 +618,7 @@ fn test_is_gist_active_false_after_expire() {
 fn test_is_gist_active_false_for_nonexistent() {
     let env = Env::default();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
     assert!(!client.is_gist_active(&999u64));
 }
 
@@ -565,7 +629,7 @@ fn test_get_active_gist_count() {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register_contract(None, GistRegistry);
-    let client = the_gist_contracts::GistRegistryClient::new(&env, &contract_id);
+    let client = GistRegistryClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let author = Address::generate(&env);
