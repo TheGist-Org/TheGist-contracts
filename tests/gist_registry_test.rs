@@ -1,5 +1,6 @@
 use soroban_sdk::{vec, Address, Bytes, Env, String};
 use soroban_sdk::testutils::Address as _;
+use the_gist_contracts::GistRegistry;
 use soroban_sdk::testutils::storage::{Instance as _, Temporary as _};
 use the_gist_contracts::GistRegistry;
 
