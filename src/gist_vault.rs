@@ -141,13 +141,32 @@ impl GistVault {
         })).unwrap()
     }
 
-    /// Get the total tips accumulated across all authors
-    /// 
-    /// # Returns
-    /// The total amount of tips in the vault
-    pub fn get_total_vault_balance(env: Env) -> i128 {
-        // This would require iterating over all storage entries
-        // For now, return 0 as this is expensive in Soroban
-        0
+/// Get the total tips accumulated across all authors
+///
+/// # Returns
+/// The total amount of tips in the vault.
+///
+/// Note: Calculating this dynamically would require iterating over
+/// all storage entries, which is expensive in Soroban. Currently,
+/// this returns `0` until aggregate tracking is implemented.
+pub fn get_total_vault_balance(env: Env) -> i128 {
+    let _ = env;
+    0
+}
+
+/// Get the tip balance for a specific author
+///
+/// # Arguments
+/// * `author` - The author's address
+///
+/// # Returns
+/// The amount of tips accumulated by the author.
+pub fn get_tip_balance(env: Env, author: Address) -> U256 {
+    let _ = author;
+
+    // Placeholder for balance query until author balances
+    // are persisted in contract storage.
+    U256::from_u128(&env, 0)
+}
     }
 }

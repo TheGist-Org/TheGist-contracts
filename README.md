@@ -67,36 +67,7 @@ Unit and integration tests live in `tests/`. All new contract logic must be cove
 
 ## Deploy to Soroban Testnet
 
-```bash
-# Configure the testnet network
-stellar network add testnet \
-  --rpc-url https://soroban-testnet.stellar.org \
-  --network-passphrase "Test SDF Network ; September 2015"
-
-# Fund a test identity
-stellar keys generate --global alice
-stellar keys fund alice --network testnet
-
-# Deploy GistRegistry
-stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/gist_registry.wasm \
-  --source alice \
-  --network testnet
-
-# Deploy GistVault
-stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/gist_vault.wasm \
-  --source alice \
-  --network testnet
-
-# Deploy LocationVerifier
-stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/location_verifier.wasm \
-  --source alice \
-  --network testnet
-```
-
-Each command outputs a contract ID. Copy these into the `TheGist-API` `.env` and the web/mobile client environment variables.
+Use the scripted flow in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ---
 

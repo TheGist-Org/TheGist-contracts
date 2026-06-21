@@ -1,0 +1,12 @@
+# Rust
+target/
+Cargo.lock
+
+# Test artifacts
+test_snapshots/
+
+# Tooling
+.claude/
+
+# Deployment outputs
+.env.contracts
