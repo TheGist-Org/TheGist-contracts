@@ -1,0 +1,24 @@
+VERSION = "0.1.0"
+
+# TheGist Protocol — Soroban Smart Contracts
+# https://github.com/TheGist-Org/TheGist-contracts
+
+[DOCUMENTATION]
+ORG_NAME = "TheGist"
+ORG_URL = "https://github.com/TheGist-Org"
+ORG_DESCRIPTION = "On-chain gist anchoring protocol built on Soroban."
+
+[[CONTRACTS]]
+name = "GistRegistry"
+description = "Primary contract. Every gist posted to TheGist is an entry here."
+address = "TBD"
+
+[[CONTRACTS]]
+name = "GistVault"
+description = "Anonymous XLM tipping vault for gist authors."
+address = "TBD"
+
+[[CONTRACTS]]
+name = "LocationVerifier"
+description = "Validates submitted geohashes against allowed geographic boundaries."
+address = "TBD"
