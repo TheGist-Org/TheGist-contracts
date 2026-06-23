@@ -1,13 +1,25 @@
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Bytes, Env, String, Vec};
 
 #[contracttype]
 enum DataKey {
+    Admin,
     RegistryAddress,
     AllowedPrefixes,
 }
 
-/// LocationVerifier - Validates that a submitted geohash falls within an allowed geographic boundary
-/// Used to enforce region-scoped deployments or to prevent spam from invalid coordinates
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct PrefixAddedEvent {
+    pub prefix: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct PrefixRemovedEvent {
+    pub prefix: String,
+}
+
+/// LocationVerifier — validates geohash boundaries and optionally proxies post_gist.
 #[contract]
 pub struct LocationVerifier;
 
@@ -29,45 +41,81 @@ impl LocationVerifier {
         if prefix_len > geohash_len {
             return false;
         }
-
         let mut geohash_buf = [0u8; 64];
         let mut prefix_buf = [0u8; 64];
         geohash.copy_into_slice(&mut geohash_buf[..geohash_len]);
         prefix.copy_into_slice(&mut prefix_buf[..prefix_len]);
         geohash_buf[..prefix_len] == prefix_buf[..prefix_len]
     }
+
+    fn ensure_admin(env: &Env, admin: &Address) {
+        admin.require_auth();
+        let stored: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("admin not initialized");
+        if stored != *admin {
+            panic!("caller is not the admin");
+        }
+    }
 }
 
 #[contractimpl]
 impl LocationVerifier {
-    /// Initialize the verifier with boundary definitions.
-    pub fn __init(env: Env) {
-        if !env.storage().instance().has(&DataKey::AllowedPrefixes) {
-            env.storage()
-                .instance()
-                .set(&DataKey::AllowedPrefixes, &Vec::<String>::new(&env));
+    /// Initialize with the admin address.
+    pub fn initialize(env: Env, admin: Address) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic!("already initialized");
         }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::AllowedPrefixes, &Vec::<String>::new(&env));
     }
 
-    /// Store the GistRegistry contract address for deployment-time wiring.
-    pub fn set_registry_address(env: Env, registry_address: Address) {
-        env.storage().instance().set(&DataKey::RegistryAddress, &registry_address);
+    /// Admin sets the GistRegistry contract address for cross-contract calls.
+    pub fn set_registry_address(env: Env, admin: Address, registry: Address) {
+        Self::ensure_admin(&env, &admin);
+        env.storage().instance().set(&DataKey::RegistryAddress, &registry);
     }
 
-    /// Read the configured GistRegistry contract address.
+    /// Returns the configured GistRegistry contract address.
     pub fn get_registry_address(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::RegistryAddress)
     }
 
-    /// Add a geohash prefix that should be considered valid.
+    /// Add a geohash prefix to the allowed list. Emits PrefixAdded.
     pub fn add_allowed_prefix(env: Env, prefix: String) {
         let mut prefixes = Self::read_allowed_prefixes(&env);
-        prefixes.push_back(prefix);
+        prefixes.push_back(prefix.clone());
         Self::write_allowed_prefixes(&env, &prefixes);
+
+        env.events().publish(
+            (symbol_short!("location"), symbol_short!("pfx_add")),
+            PrefixAddedEvent { prefix },
+        );
     }
 
-    /// Verify if a geohash is within allowed boundaries.
-    pub fn verify_geohash(env: Env, geohash: String) -> bool {
+    /// Remove a geohash prefix from the allowed list. Emits PrefixRemoved.
+    pub fn remove_allowed_prefix(env: Env, prefix: String) {
+        let prefixes = Self::read_allowed_prefixes(&env);
+        let mut new_prefixes = Vec::new(&env);
+        for p in prefixes.iter() {
+            if p != prefix {
+                new_prefixes.push_back(p);
+            }
+        }
+        Self::write_allowed_prefixes(&env, &new_prefixes);
+
+        env.events().publish(
+            (symbol_short!("location"), symbol_short!("pfx_rm")),
+            PrefixRemovedEvent { prefix },
+        );
+    }
+
+    /// Returns true if geohash matches any allowed prefix.
+    pub fn is_valid_geohash(env: Env, geohash: String) -> bool {
         let prefixes = Self::read_allowed_prefixes(&env);
         for prefix in prefixes.iter() {
             if Self::matches_prefix(&geohash, &prefix) {
@@ -77,20 +125,58 @@ impl LocationVerifier {
         false
     }
 
-    /// Replace boundary definitions with a single prefix.
-    pub fn update_boundaries(env: Env, boundaries: String) {
+    /// Legacy alias kept for compatibility.
+    pub fn verify_geohash(env: Env, geohash: String) -> bool {
+        Self::is_valid_geohash(env, geohash)
+    }
+
+    /// Replace all allowed prefixes with a single new value.
+    pub fn update_boundaries(env: Env, boundary: String) {
         let mut prefixes = Vec::new(&env);
-        prefixes.push_back(boundaries);
+        prefixes.push_back(boundary);
         Self::write_allowed_prefixes(&env, &prefixes);
     }
 
-    /// Get current boundary definitions.
+    /// Returns the first allowed prefix, or an empty string if none set.
     pub fn get_boundaries(env: Env) -> String {
         let prefixes = Self::read_allowed_prefixes(&env);
         if let Some(prefix) = prefixes.get(0) {
             prefix
         } else {
-            String::from_slice(&env, "{}")
+            String::from_slice(&env, "")
         }
+    }
+
+    /// Validates geohash then cross-contract calls GistRegistry.post_gist atomically.
+    pub fn verify_and_post(
+        env: Env,
+        author: Address,
+        ipfs_cid: Bytes,
+        location_cell: String,
+        ttl_or_expiry: Option<u64>,
+    ) -> u64 {
+        author.require_auth();
+
+        if !Self::is_valid_geohash(env.clone(), location_cell.clone()) {
+            panic!("invalid or disallowed location cell");
+        }
+
+        let registry: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::RegistryAddress)
+            .expect("registry address not set");
+
+        env.invoke_contract(
+            &registry,
+            &soroban_sdk::symbol_short!("post_gist"),
+            soroban_sdk::vec![
+                &env,
+                ipfs_cid.into_val(&env),
+                location_cell.into_val(&env),
+                author.into_val(&env),
+                ttl_or_expiry.into_val(&env),
+            ],
+        )
     }
 }

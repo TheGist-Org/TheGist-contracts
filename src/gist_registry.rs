@@ -43,6 +43,13 @@ pub struct GistExpiredEvent {
     pub expired_by: Address,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct ContractUpgradedEvent {
+    pub old_version: u32,
+    pub new_version: u32,
+}
+
 #[contract]
 pub struct GistRegistry;
 

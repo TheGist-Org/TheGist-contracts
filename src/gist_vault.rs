@@ -1,30 +1,137 @@
-use soroban_sdk::{contract, contractimpl, Address, Env, U256};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, token, Address, Env,
+};
 
-/// GistVault - An optional tipping vault for anonymous XLM tips
-/// Users can send XLM tips to gist authors anonymously via Soroban escrow
+#[contracttype]
+enum DataKey {
+    TokenAddress,
+    PendingBalance(Address),
+    GistTotalTips(u64),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct GistTippedEvent {
+    pub gist_id: u64,
+    pub recipient: Address,
+    pub amount: i128,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct TipsClaimedEvent {
+    pub recipient: Address,
+    pub amount: i128,
+}
+
 #[contract]
 pub struct GistVault;
 
+impl GistVault {
+    fn pending_key(recipient: &Address) -> DataKey {
+        DataKey::PendingBalance(recipient.clone())
+    }
+
+    fn gist_tips_key(gist_id: u64) -> DataKey {
+        DataKey::GistTotalTips(gist_id)
+    }
+
+    fn read_pending(env: &Env, recipient: &Address) -> i128 {
+        env.storage()
+            .instance()
+            .get(&Self::pending_key(recipient))
+            .unwrap_or(0i128)
+    }
+
+    fn read_gist_total(env: &Env, gist_id: u64) -> i128 {
+        env.storage()
+            .instance()
+            .get(&Self::gist_tips_key(gist_id))
+            .unwrap_or(0i128)
+    }
+}
+
 #[contractimpl]
 impl GistVault {
-    /// Initialize the vault
-    pub fn __init(env: Env) {
-        // Placeholder for initialization logic
+    /// Store the XLM token contract address on first deployment.
+    pub fn initialize(env: Env, token: Address) {
+        if env.storage().instance().has(&DataKey::TokenAddress) {
+            panic!("already initialized");
+        }
+        env.storage().instance().set(&DataKey::TokenAddress, &token);
     }
 
-    /// Deposit a tip for a gist author
-    pub fn deposit_tip(env: Env, gist_id: u64, amount: U256) {
-        // Placeholder for deposit logic
+    /// Tip a gist author. Transfers `amount` tokens from caller to vault.
+    pub fn tip_author(env: Env, tipper: Address, recipient: Address, gist_id: u64, amount: i128) {
+        tipper.require_auth();
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenAddress)
+            .expect("vault not initialized");
+        let token_client = token::Client::new(&env, &token_addr);
+        token_client.transfer(&tipper, &env.current_contract_address(), &amount);
+
+        let new_balance = Self::read_pending(&env, &recipient)
+            .checked_add(amount)
+            .expect("balance overflow");
+        env.storage()
+            .instance()
+            .set(&Self::pending_key(&recipient), &new_balance);
+
+        let new_total = Self::read_gist_total(&env, gist_id)
+            .checked_add(amount)
+            .expect("total overflow");
+        env.storage()
+            .instance()
+            .set(&Self::gist_tips_key(gist_id), &new_total);
+
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("tipped")),
+            GistTippedEvent { gist_id, recipient, amount },
+        );
     }
 
-    /// Withdraw accumulated tips
-    pub fn withdraw_tips(env: Env, author: Address) {
-        // Placeholder for withdrawal logic
+    /// Claim all pending tips. Panics if balance is zero.
+    pub fn claim_tips(env: Env, recipient: Address) -> i128 {
+        recipient.require_auth();
+
+        let balance = Self::read_pending(&env, &recipient);
+        if balance == 0 {
+            panic!("no pending tips to claim");
+        }
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenAddress)
+            .expect("vault not initialized");
+        let token_client = token::Client::new(&env, &token_addr);
+        token_client.transfer(&env.current_contract_address(), &recipient, &balance);
+
+        env.storage()
+            .instance()
+            .set(&Self::pending_key(&recipient), &0i128);
+
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("claimed")),
+            TipsClaimedEvent { recipient, amount: balance },
+        );
+
+        balance
     }
 
-    /// Get tip balance for an author
-    pub fn get_tip_balance(env: Env, author: Address) -> U256 {
-        // Placeholder for balance query
-        U256::from_u128(&env, 0)
+    /// Returns unclaimed tip balance for `recipient`. Returns 0 if none.
+    pub fn get_pending_balance(env: Env, recipient: Address) -> i128 {
+        Self::read_pending(&env, &recipient)
+    }
+
+    /// Returns total XLM tipped to a gist across all tippers.
+    pub fn get_total_tips_for_gist(env: Env, gist_id: u64) -> i128 {
+        Self::read_gist_total(&env, gist_id)
     }
 }
