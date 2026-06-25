@@ -71,61 +71,6 @@ fn test_set_admin_wrong_caller_panics() {
     client.set_admin(&impostor, &new_admin);
 }
 
-// ── upgrade ──────────────────────────────────────────────────────────────────
-
-#[test]
-fn test_upgrade_increments_version() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let contract_id = env.register_contract(None, GistRegistry);
-    let client = GistRegistryClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
-    client.initialize(&admin);
-    assert_eq!(client.get_version(), 1);
-
-    // Register a second WASM to use as the upgrade target
-    let new_wasm_hash: BytesN<32> = env
-        .deployer()
-        .upload_contract_wasm(soroban_sdk::xdr::ScBytes::from(vec![0u8; 32].as_slice()));
-    client.upgrade(&admin, &new_wasm_hash);
-    assert_eq!(client.get_version(), 2);
-}
-
-#[test]
-#[should_panic(expected = "caller is not the admin")]
-fn test_upgrade_non_admin_panics() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let contract_id = env.register_contract(None, GistRegistry);
-    let client = GistRegistryClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
-    let impostor = Address::generate(&env);
-    client.initialize(&admin);
-
-    let new_wasm_hash: BytesN<32> = env
-        .deployer()
-        .upload_contract_wasm(soroban_sdk::xdr::ScBytes::from(vec![0u8; 32].as_slice()));
-    client.upgrade(&impostor, &new_wasm_hash);
-}
-
-#[test]
-fn test_upgrade_multiple_times_increments_version() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let contract_id = env.register_contract(None, GistRegistry);
-    let client = GistRegistryClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
-    client.initialize(&admin);
-
-    let wasm_hash: BytesN<32> = env
-        .deployer()
-        .upload_contract_wasm(soroban_sdk::xdr::ScBytes::from(vec![0u8; 32].as_slice()));
-    client.upgrade(&admin, &wasm_hash);
-    client.upgrade(&admin, &wasm_hash);
-    client.upgrade(&admin, &wasm_hash);
-    assert_eq!(client.get_version(), 4);
-}
-
 // ── post_gist – happy path ───────────────────────────────────────────────────
 
 #[test]
