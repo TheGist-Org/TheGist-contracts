@@ -39,6 +39,30 @@ pub struct TipsWithdrawnEvent {
 #[contract]
 pub struct GistVault;
 
+impl GistVault {
+    fn pending_key(recipient: &Address) -> DataKey {
+        DataKey::PendingBalance(recipient.clone())
+    }
+
+    fn gist_tips_key(gist_id: u64) -> DataKey {
+        DataKey::GistTotalTips(gist_id)
+    }
+
+    fn read_pending(env: &Env, recipient: &Address) -> i128 {
+        env.storage()
+            .instance()
+            .get(&Self::pending_key(recipient))
+            .unwrap_or(0i128)
+    }
+
+    fn read_gist_total(env: &Env, gist_id: u64) -> i128 {
+        env.storage()
+            .instance()
+            .get(&Self::gist_tips_key(gist_id))
+            .unwrap_or(0i128)
+    }
+}
+
 #[contractimpl]
 impl GistVault {
     /// Send a tip to a gist author anonymously
