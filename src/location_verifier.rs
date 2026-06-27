@@ -5,6 +5,7 @@ enum DataKey {
     Admin,
     RegistryAddress,
     AllowedPrefixes,
+    Admin,
 }
 
 /// LocationVerifier - Validates that a submitted geohash falls within an allowed geographic boundary.
@@ -23,7 +24,23 @@ impl LocationVerifier {
     }
 
     fn write_allowed_prefixes(env: &Env, prefixes: &Vec<String>) {
-        env.storage().instance().set(&DataKey::AllowedPrefixes, prefixes);
+        env.storage()
+            .instance()
+            .set(&DataKey::AllowedPrefixes, prefixes);
+    }
+
+    fn require_admin(env: &Env, admin: &Address) {
+        admin.require_auth();
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("admin not initialized");
+
+        if stored_admin != *admin {
+            panic!("not admin");
+        }
     }
 
     fn ensure_admin(env: &Env, caller: &Address) {
@@ -39,7 +56,7 @@ impl LocationVerifier {
     }
 
     fn matches_prefix(geohash: &String, prefix: &String) -> bool {
-        let gh_len = geohash.len() as usize;
+yyy        let gh_len = geohash.len() as usize;
         let p_len = prefix.len() as usize;
         if p_len > gh_len {
             return false;
@@ -61,6 +78,27 @@ impl LocationVerifier {
         if stored != *admin {
             panic!("caller is not the admin");
         }
+    }
+
+    fn is_valid_geohash_format(location_cell: &String) -> bool {
+        if location_cell.len() != 7 {
+            return false;
+        }
+
+        let valid_chars = b"0123456789bcdefghjkmnpqrstuvwxyz";
+
+        let len = location_cell.len() as usize;
+        let mut buffer = [0u8; 64];
+
+        location_cell.copy_into_slice(&mut buffer[..len]);
+
+        for i in 0..len {
+            if !valid_chars.contains(&buffer[i]) {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
@@ -88,7 +126,9 @@ impl LocationVerifier {
 
     /// Returns the configured GistRegistry contract address.
     pub fn get_registry_address(env: Env) -> Option<Address> {
-        env.storage().instance().get(&DataKey::RegistryAddress)
+        env.storage()
+            .instance()
+            .get(&DataKey::RegistryAddress)
     }
 
     /// Validate a geohash: exactly 7 chars, only valid base-32 alphabet.
@@ -178,11 +218,13 @@ impl LocationVerifier {
     /// Verify if a geohash is within allowed boundaries (no character validation).
     pub fn verify_geohash(env: Env, geohash: String) -> bool {
         let prefixes = Self::read_allowed_prefixes(&env);
+
         for prefix in prefixes.iter() {
-            if Self::matches_prefix(&geohash, &prefix) {
+            if Self::matches_prefix(&location_cell, &prefix) {
                 return true;
             }
         }
+
         false
     }
 
@@ -196,9 +238,14 @@ impl LocationVerifier {
     /// Get first boundary definition.
     pub fn get_boundaries(env: Env) -> String {
         let prefixes = Self::read_allowed_prefixes(&env);
+
         if let Some(prefix) = prefixes.get(0) {
             prefix
         } else {
+            String::from_str(&env, "{}")
+        }
+    }
+}
             String::from_slice(&env, "")
         }
     }

@@ -300,6 +300,21 @@ impl GistRegistry {
     ) -> u64 {
         author.require_auth();
 
+        let gist_id = Self::read_gist_count(&env);
+        let new_gist_id = gist_id.checked_add(1).unwrap();
+        env.storage().instance().set(&DataKey::GistCount, &new_gist_id);
+
+        let timestamp = env.ledger().timestamp();
+        if let Some(expiry_input) = ttl_or_expiry {
+    if expiry_input <= timestamp {
+        panic!("expiry must be in the future");
+    }
+
+    if expiry_input > timestamp + 604_800 {
+        panic!("expiry cannot exceed 168 hours from now");
+    }
+}
+        let (expiry, ledger_ttl) = Self::gist_time_to_expiry(&env, ttl_or_expiry);
         if ipfs_cid.len() == 0 {
             panic!("ipfs_cid cannot be empty");
         }

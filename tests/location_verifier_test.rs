@@ -230,3 +230,60 @@ fn test_verify_and_post_increments_gist_id() {
     let id2 = lv_client.verify_and_post(&geohash, &cid, &author, &None);
     assert_eq!(id2, id1 + 1);
 }
+
+#[test]
+fn test_invalid_character() {
+    let (env, client, admin) = setup();
+
+    client.add_allowed_prefix(
+        &admin,
+        &String::from_str(&env, "s17"),
+    );
+
+    assert!(
+        !client.is_valid_geohash(
+            &String::from_str(&env, "s17abi")
+        )
+    );
+}
+
+#[test]
+fn test_outside_allowed_prefix() {
+    let (env, client, admin) = setup();
+
+    client.add_allowed_prefix(
+        &admin,
+        &String::from_str(&env, "s17"),
+    );
+
+    assert!(
+        !client.is_valid_geohash(
+            &String::from_str(&env, "u44abcd")
+        )
+    );
+}
+
+#[test]
+fn test_add_and_remove_prefix() {
+    let (env, client, admin) = setup();
+
+    client.add_allowed_prefix(
+        &admin,
+        &String::from_str(&env, "s17"),
+    );
+
+    assert_eq!(
+        client.get_allowed_prefixes().len(),
+        1
+    );
+
+    client.remove_allowed_prefix(
+        &admin,
+        &String::from_str(&env, "s17"),
+    );
+
+    assert_eq!(
+        client.get_allowed_prefixes().len(),
+        0
+    );
+}
