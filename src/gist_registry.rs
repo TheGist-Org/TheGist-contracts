@@ -43,6 +43,13 @@ pub struct GistExpiredEvent {
     pub expired_by: Address,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct ContractUpgradedEvent {
+    pub old_version: u32,
+    pub new_version: u32,
+}
+
 #[contract]
 pub struct GistRegistry;
 
@@ -293,12 +300,6 @@ impl GistRegistry {
     ) -> u64 {
         author.require_auth();
 
-        let gist_id = Self::read_gist_count(&env);
-        let new_gist_id = gist_id.checked_add(1).unwrap();
-        env.storage().instance().set(&DataKey::GistCount, &new_gist_id);
-
-        let timestamp = env.ledger().timestamp();
-        let (expiry, ledger_ttl) = Self::gist_time_to_expiry(&env, ttl_or_expiry);
         if ipfs_cid.len() == 0 {
             panic!("ipfs_cid cannot be empty");
         }
@@ -306,6 +307,7 @@ impl GistRegistry {
             panic!("geohash must be exactly 7 characters");
         }
 
+        let (expiry, ledger_ttl) = Self::gist_time_to_expiry(&env, ttl_or_expiry);
         let timestamp = env.ledger().timestamp();
         if expiry <= timestamp {
             panic!("expiry must be in the future");
