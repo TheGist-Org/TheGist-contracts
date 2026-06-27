@@ -165,6 +165,8 @@ impl GistRegistry {
 
     pub fn get_version(_: Env) -> u32 {
         1
+    }
+
     pub fn get_contract_version(env: Env) -> u32 {
         env.storage()
             .instance()
@@ -298,12 +300,6 @@ impl GistRegistry {
     ) -> u64 {
         author.require_auth();
 
-        let gist_id = Self::read_gist_count(&env);
-        let new_gist_id = gist_id.checked_add(1).unwrap();
-        env.storage().instance().set(&DataKey::GistCount, &new_gist_id);
-
-        let timestamp = env.ledger().timestamp();
-        let (expiry, ledger_ttl) = Self::gist_time_to_expiry(&env, ttl_or_expiry);
         if ipfs_cid.len() == 0 {
             panic!("ipfs_cid cannot be empty");
         }
@@ -311,24 +307,14 @@ impl GistRegistry {
             panic!("geohash must be exactly 7 characters");
         }
 
+        let (expiry, ledger_ttl) = Self::gist_time_to_expiry(&env, ttl_or_expiry);
         let timestamp = env.ledger().timestamp();
-        let resolved_expiry = expiry.unwrap_or(timestamp + 86400);
-        if resolved_expiry <= timestamp {
+        if expiry <= timestamp {
             panic!("expiry must be in the future");
         }
-        if resolved_expiry > timestamp + 604800 {
+        if expiry > timestamp + 604800 {
             panic!("expiry cannot exceed 168 hours from now");
         }
-
-        let gist_id: u64 = env
-            .storage()
-            .instance()
-            .get(&DataKey::GistCount)
-            .unwrap_or(0u64);
-        let new_gist_id = gist_id.checked_add(1).unwrap();
-        env.storage().instance().set(&DataKey::GistCount, &new_gist_id);
-
-        let expiry = resolved_expiry;
 
         let gist = Gist {
             gist_id: new_gist_id,
