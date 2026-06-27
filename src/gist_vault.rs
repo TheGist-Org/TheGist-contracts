@@ -1,3 +1,20 @@
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, token, Address, Env,
+};
+
+#[contracttype]
+enum DataKey {
+    TokenAddress,
+    PendingBalance(Address),
+    GistTotalTips(u64),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct GistTippedEvent {
+    pub gist_id: u64,
+    pub recipient: Address,
+    pub amount: i128,
 use soroban_sdk::{contract, contractimpl, Address, Env};
 
 /// Tip data structure tracking accumulated tips for an author
