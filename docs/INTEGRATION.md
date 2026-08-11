@@ -14,20 +14,19 @@ Recommended polling pattern:
 4. For each `GistExpiredEvent`, mark the corresponding `gist_id` as expired in your own index, keyed by `expired_by` to distinguish self-expiry from admin/batch expiry if that distinction matters to your application.
 5. Update your last-processed-ledger checkpoint only after successfully handling a batch of events, so a crash mid-batch doesn't skip events on restart.
 
-`LocationVerifier` does not currently emit any events — it has no `env.events().publish()` calls anywhere in its implementation. If you need to track changes to the allowed-prefix list, you'll need to poll `get_boundaries()` directly, or request that event emission be added to that contract.
+`LocationVerifier` emits `PrefixAdded` and `PrefixRemoved` events when the admin changes the allow-list (see [`EVENTS.md`](./EVENTS.md#locationverifier)). It does not emit anything for reads like `verify_geohash` or `is_valid_geohash`, which have no side effects.
 
 ## How the web client calls `post_gist`
 
-There is no function literally named `verify_and_post` in the current contracts — the closest equivalent is calling `LocationVerifier.verify_geohash()` followed by `GistRegistry.post_gist()` as two separate calls, since the contracts do not call each other automatically (see [`CONTRACTS.md`](./CONTRACTS.md#how-they-interact)).
+`LocationVerifier.verify_and_post(geohash, ipfs_cid, author, ttl_or_expiry)` does both steps in one call: it validates the geohash against the configured allow-list and, if valid, cross-contract calls `GistRegistry.post_gist()` and returns the new `gist_id`. This requires `LocationVerifier` to have been configured with the registry's address via `set_registry_address` (see [`LOCATION_VERIFIER.md`](./LOCATION_VERIFIER.md)).
 
 The expected client-side flow:
 
 1. **Compute the geohash** for the user's location, encoded to exactly 7 characters (required by `post_gist`'s validation).
-2. **Call `LocationVerifier.verify_geohash(geohash)`** using the `LOCATION_VERIFIER_CONTRACT_ID` from your environment. If this returns `false`, stop here and show the user a "not available in your region" message — do not proceed to step 3.
-3. **Upload content to IPFS** and obtain the resulting CID, encoded as `Bytes` for the contract call.
-4. **Call `GistRegistry.post_gist(ipfs_cid, geohash, author, ttl_or_expiry)`** using the `GIST_REGISTRY_CONTRACT_ID`. The `author` address must sign/authorize this transaction, since `post_gist` calls `author.require_auth()`.
-5. **Handle errors** from `post_gist` — see the [error messages reference](./GIST_REGISTRY.md#error-messages-reference) for the exact panic messages your client should catch and translate into user-facing errors (e.g. `"geohash must be exactly 7 characters"`, `"expiry cannot exceed 168 hours from now"`).
-6. **Listen for the `GistPostedEvent`** (or simply use the returned `gist_id` from the transaction result) to confirm success and update the UI.
+2. **Upload content to IPFS** and obtain the resulting CID, encoded as `Bytes` for the contract call.
+3. **Call `LocationVerifier.verify_and_post(geohash, ipfs_cid, author, ttl_or_expiry)`** using the `LOCATION_VERIFIER_CONTRACT_ID`. The `author` address must sign/authorize this transaction. If the geohash isn't in an allowed region, this panics with `"geohash is not valid or not in an allowed region"` — catch that and show a "not available in your region" message.
+4. **Handle errors** from `post_gist` propagated through `verify_and_post` — see the [error messages reference](./GIST_REGISTRY.md#error-messages-reference) for the exact panic messages your client should catch and translate into user-facing errors (e.g. `"geohash must be exactly 7 characters"`, `"expiry cannot exceed 168 hours from now"`).
+5. **Listen for the `GistPostedEvent`** (or simply use the returned `gist_id` from the transaction result) to confirm success and update the UI.
 
 ## How to test against localnet
 

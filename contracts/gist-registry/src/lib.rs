@@ -1,4 +1,12 @@
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Bytes, Env, String, Vec};
+#![no_std]
+// soroban-sdk's #[contract]/#[contractimpl]/#[contractclient] macros expand to code
+// using .unwrap() internally; this repo's clippy.toml denies it for app code, but that
+// can't be scoped around macro-generated spans, so it's allowed crate-wide here.
+#![allow(clippy::disallowed_methods)]
+
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, Bytes, Env, String, Vec,
+};
 
 const CONTRACT_VERSION: u32 = 2;
 const LEDGERS_PER_HOUR: u32 = 720;
@@ -92,22 +100,20 @@ impl GistRegistry {
         let ttl_seconds = u64::from(ttl_hours)
             .checked_mul(SECONDS_PER_HOUR)
             .expect("ttl too large");
-        let expiry = now
-            .checked_add(ttl_seconds)
-            .expect("expiry too large");
+        let expiry = now.checked_add(ttl_seconds).expect("expiry too large");
         (expiry, Self::hours_to_ledger_ttl(ttl_hours))
     }
 
     fn load_gist(env: &Env, gist_id: u64) -> Option<Gist> {
-        env.storage()
-            .temporary()
-            .get(&Self::gist_key(gist_id))
+        env.storage().temporary().get(&Self::gist_key(gist_id))
     }
 
     fn store_gist(env: &Env, gist: &Gist, ledger_ttl: u32) {
         let key = Self::gist_key(gist.gist_id);
         env.storage().temporary().set(&key, gist);
-        env.storage().temporary().extend_ttl(&key, ledger_ttl, ledger_ttl);
+        env.storage()
+            .temporary()
+            .extend_ttl(&key, ledger_ttl, ledger_ttl);
     }
 
     fn append_author_gist(env: &Env, author: &Address, gist_id: u64) {
@@ -156,7 +162,9 @@ impl GistRegistry {
             panic!("already initialized");
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::ContractVersion, &CONTRACT_VERSION);
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractVersion, &CONTRACT_VERSION);
     }
 
     pub fn get_admin(env: Env) -> Option<Address> {
@@ -204,7 +212,10 @@ impl GistRegistry {
         Self::update_gist(&env, &gist);
         env.events().publish(
             (symbol_short!("gist"), symbol_short!("expired")),
-            GistExpiredEvent { gist_id, expired_by: caller },
+            GistExpiredEvent {
+                gist_id,
+                expired_by: caller,
+            },
         );
     }
 
@@ -221,7 +232,10 @@ impl GistRegistry {
         Self::update_gist(&env, &gist);
         env.events().publish(
             (symbol_short!("gist"), symbol_short!("expired")),
-            GistExpiredEvent { gist_id, expired_by: admin },
+            GistExpiredEvent {
+                gist_id,
+                expired_by: admin,
+            },
         );
     }
 
@@ -239,7 +253,10 @@ impl GistRegistry {
                 Self::update_gist(&env, &gist);
                 env.events().publish(
                     (symbol_short!("gist"), symbol_short!("expired")),
-                    GistExpiredEvent { gist_id, expired_by: admin.clone() },
+                    GistExpiredEvent {
+                        gist_id,
+                        expired_by: admin.clone(),
+                    },
                 );
                 count += 1;
             }
@@ -280,7 +297,9 @@ impl GistRegistry {
             .expect("gist already expired");
         let ledger_ttl = Self::seconds_to_ledger_ttl(remaining_seconds);
         let key = Self::gist_key(gist_id);
-        env.storage().temporary().extend_ttl(&key, ledger_ttl, ledger_ttl);
+        env.storage()
+            .temporary()
+            .extend_ttl(&key, ledger_ttl, ledger_ttl);
     }
 
     /// Returns false if the gist doesn't exist, was manually expired, or is past its TTL.
@@ -301,21 +320,12 @@ impl GistRegistry {
         author.require_auth();
 
         let gist_id = Self::read_gist_count(&env);
-        let new_gist_id = gist_id.checked_add(1).unwrap();
-        env.storage().instance().set(&DataKey::GistCount, &new_gist_id);
+        let new_gist_id = gist_id.checked_add(1).expect("gist count overflow");
+        env.storage()
+            .instance()
+            .set(&DataKey::GistCount, &new_gist_id);
 
-        let timestamp = env.ledger().timestamp();
-        if let Some(expiry_input) = ttl_or_expiry {
-    if expiry_input <= timestamp {
-        panic!("expiry must be in the future");
-    }
-
-    if expiry_input > timestamp + 604_800 {
-        panic!("expiry cannot exceed 168 hours from now");
-    }
-}
-        let (expiry, ledger_ttl) = Self::gist_time_to_expiry(&env, ttl_or_expiry);
-        if ipfs_cid.len() == 0 {
+        if ipfs_cid.is_empty() {
             panic!("ipfs_cid cannot be empty");
         }
         if geohash.len() != 7 {
@@ -346,7 +356,11 @@ impl GistRegistry {
 
         env.events().publish(
             (symbol_short!("gist"), symbol_short!("posted")),
-            GistPostedEvent { gist_id: new_gist_id, author, timestamp },
+            GistPostedEvent {
+                gist_id: new_gist_id,
+                author,
+                timestamp,
+            },
         );
 
         new_gist_id
@@ -372,7 +386,7 @@ impl GistRegistry {
             .get::<DataKey, Vec<u64>>(&Self::author_gists_key(&author))
         {
             for gist_id in gist_ids.iter() {
-                if result.len() as u32 >= limit {
+                if result.len() >= limit {
                     break;
                 }
                 if Self::load_gist(&env, gist_id).is_some() {

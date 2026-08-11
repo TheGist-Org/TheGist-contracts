@@ -1,7 +1,9 @@
+#![allow(clippy::disallowed_methods)]
+
+use gist_registry::{GistRegistry, GistRegistryClient};
 use soroban_sdk::testutils::storage::{Instance as _, Temporary as _};
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{vec, Address, Bytes, BytesN, Env, String};
-use the_gist_contracts::{GistRegistry, GistRegistryClient};
+use soroban_sdk::{vec, Address, Bytes, Env, String};
 
 // ── initialize / admin ───────────────────────────────────────────────────────
 
@@ -82,7 +84,7 @@ fn test_post_gist() {
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
 
     let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &None);
     assert_eq!(gist_id, 1);
@@ -106,7 +108,7 @@ fn test_post_gist_uses_temporary_storage_and_instance_metadata() {
     let admin = Address::generate(&env);
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest789");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
 
     client.initialize(&admin);
     let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &Some(24));
@@ -134,7 +136,7 @@ fn test_post_gist_id_increments() {
     let author2 = Address::generate(&env);
     let ipfs_cid1 = Bytes::from_slice(&env, b"QmTest123");
     let ipfs_cid2 = Bytes::from_slice(&env, b"QmTest456");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
 
     let id1 = client.post_gist(&ipfs_cid1, &geohash, &author1, &None);
     let id2 = client.post_gist(&ipfs_cid2, &geohash, &author2, &None);
@@ -152,7 +154,7 @@ fn test_post_gist_is_active() {
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &None);
     assert!(client.get_gist(&gist_id).unwrap().is_active);
 }
@@ -166,7 +168,7 @@ fn test_post_gist_custom_expiry() {
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     let custom_expiry = env.ledger().timestamp() + 172800;
     let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &Some(custom_expiry));
     assert_eq!(client.get_gist(&gist_id).unwrap().expiry, custom_expiry);
@@ -183,7 +185,7 @@ fn test_post_gist_empty_cid_panics() {
     let client = GistRegistryClient::new(&env, &contract_id);
     let author = Address::generate(&env);
     let empty_cid = Bytes::from_slice(&env, b"");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     client.post_gist(&empty_cid, &geohash, &author, &None);
 }
 
@@ -196,7 +198,7 @@ fn test_post_gist_geohash_too_short_panics() {
     let client = GistRegistryClient::new(&env, &contract_id);
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pru");
+    let geohash = String::from_str(&env, "u4pru");
     client.post_gist(&ipfs_cid, &geohash, &author, &None);
 }
 
@@ -209,7 +211,7 @@ fn test_post_gist_geohash_too_long_panics() {
     let client = GistRegistryClient::new(&env, &contract_id);
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruydx");
+    let geohash = String::from_str(&env, "u4pruydx");
     client.post_gist(&ipfs_cid, &geohash, &author, &None);
 }
 
@@ -222,7 +224,7 @@ fn test_post_gist_expiry_in_past_panics() {
     let client = GistRegistryClient::new(&env, &contract_id);
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     let past_expiry = env.ledger().timestamp();
     client.post_gist(&ipfs_cid, &geohash, &author, &Some(past_expiry));
 }
@@ -236,7 +238,7 @@ fn test_post_gist_expiry_exceeds_max_panics() {
     let client = GistRegistryClient::new(&env, &contract_id);
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     let far_future = env.ledger().timestamp() + 604801;
     client.post_gist(&ipfs_cid, &geohash, &author, &Some(far_future));
 }
@@ -263,7 +265,7 @@ fn test_get_gists_by_author() {
     let author1 = Address::generate(&env);
     let author2 = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
 
     client.post_gist(&ipfs_cid, &geohash, &author1, &None);
     client.post_gist(&ipfs_cid, &geohash, &author2, &None);
@@ -283,7 +285,7 @@ fn test_get_gists_by_author_empty() {
     let author = Address::generate(&env);
     let other = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     client.post_gist(&ipfs_cid, &geohash, &other, &None);
 
     let result = client.get_gists_by_author(&author, &10u32, &0u32);
@@ -299,7 +301,7 @@ fn test_extend_gist_ttl() {
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
 
     let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &Some(24));
     let original = client.get_gist(&gist_id).unwrap();
@@ -324,7 +326,7 @@ fn test_extend_gist_ttl_requires_author_auth() {
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
 
     let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &Some(24));
 
@@ -342,7 +344,7 @@ fn test_get_gists_by_author_pagination() {
     let author = Address::generate(&env);
     let other = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
 
     for _ in 0..5 {
         client.post_gist(&ipfs_cid, &geohash, &author, &None);
@@ -386,12 +388,12 @@ fn test_get_gists_by_geohash() {
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
 
     client.post_gist(&ipfs_cid, &geohash, &author, &None);
     client.post_gist(&ipfs_cid, &geohash, &author, &None);
 
-    let gists = client.get_gists_by_geohash(&String::from_slice(&env, "u4pruy"));
+    let gists = client.get_gists_by_geohash(&String::from_str(&env, "u4pruy"));
     assert_eq!(gists.len(), 2);
 }
 
@@ -406,7 +408,7 @@ fn test_expire_gist_by_author() {
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &None);
 
     assert!(client.get_gist(&gist_id).unwrap().is_active);
@@ -425,7 +427,7 @@ fn test_expire_gist_non_author_panics() {
     let author = Address::generate(&env);
     let other = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &None);
     client.expire_gist(&other, &gist_id);
 }
@@ -442,7 +444,7 @@ fn test_admin_expire_gist() {
     let admin = Address::generate(&env);
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     client.initialize(&admin);
     let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &None);
 
@@ -462,7 +464,7 @@ fn test_admin_expire_gist_wrong_admin_panics() {
     let impostor = Address::generate(&env);
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     client.initialize(&admin);
     let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &None);
     client.admin_expire_gist(&impostor, &gist_id);
@@ -480,7 +482,7 @@ fn test_batch_expire() {
     let admin = Address::generate(&env);
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     client.initialize(&admin);
     let id1 = client.post_gist(&ipfs_cid, &geohash, &author, &None);
     let id2 = client.post_gist(&ipfs_cid, &geohash, &author, &None);
@@ -503,7 +505,7 @@ fn test_batch_expire_skips_nonexistent() {
     let admin = Address::generate(&env);
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     client.initialize(&admin);
     let id1 = client.post_gist(&ipfs_cid, &geohash, &author, &None);
 
@@ -539,7 +541,7 @@ fn test_is_gist_active_true_for_new_gist() {
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &None);
     assert!(client.is_gist_active(&gist_id));
 }
@@ -553,7 +555,7 @@ fn test_is_gist_active_false_after_expire() {
 
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &None);
     client.expire_gist(&author, &gist_id);
     assert!(!client.is_gist_active(&gist_id));
@@ -579,7 +581,7 @@ fn test_get_active_gist_count() {
     let admin = Address::generate(&env);
     let author = Address::generate(&env);
     let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
     client.initialize(&admin);
 
     let id1 = client.post_gist(&ipfs_cid, &geohash, &author, &None);

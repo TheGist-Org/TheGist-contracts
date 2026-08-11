@@ -3,6 +3,8 @@ name: Contracts CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,18 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.81.0
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
   format:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.81.0
         with:
           components: rustfmt
       - run: cargo fmt --check
@@ -34,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.81.0
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
 
@@ -43,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.81.0
       - uses: Swatinem/rust-cache@v2
       - run: cargo install --locked cargo-audit
       - run: cargo audit
@@ -53,8 +55,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.81.0
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --target wasm32-unknown-unknown --release
+      - run: cargo build --workspace --target wasm32-unknown-unknown --release

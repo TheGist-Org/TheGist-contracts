@@ -1,16 +1,13 @@
-[package]
-name = "the-gist-contracts"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+resolver = "2"
+members = [
+    "contracts/gist-registry",
+    "contracts/gist-vault",
+    "contracts/location-verifier",
+]
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
-[dependencies]
-soroban-sdk = { version = "21.0.0", features = ["testutils"] }
-
-[dev-dependencies]
-soroban-sdk = { version = "21.0.0", features = ["testutils"] }
+[workspace.dependencies]
+soroban-sdk = "21.0.0"
 
 [profile.release]
 opt-level = "z"
@@ -19,6 +16,7 @@ debug = 0
 strip = "debuginfo"
 lto = true
 codegen-units = 1
+panic = "abort"
 
 [profile.release-with-logs]
 inherits = "release"

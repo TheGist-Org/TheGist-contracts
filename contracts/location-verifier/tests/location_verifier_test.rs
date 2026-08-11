@@ -1,13 +1,9 @@
 #![cfg(test)]
+#![allow(clippy::disallowed_methods)]
 
-use soroban_sdk::{
-    testutils::Address as _,
-    Address, Bytes, Env, String,
-};
-use the_gist_contracts::{
-    GistRegistry, GistRegistryClient,
-    LocationVerifier, LocationVerifierClient,
-};
+use gist_registry::{GistRegistry, GistRegistryClient};
+use location_verifier::{LocationVerifier, LocationVerifierClient};
+use soroban_sdk::{testutils::Address as _, Address, Bytes, Env, String};
 
 // ──────────────────────────────────────────────
 // Helpers
@@ -21,11 +17,11 @@ fn setup() -> (Env, LocationVerifierClient<'static>) {
     let admin = Address::generate(&env);
     client.initialize(&admin);
     // add a known good prefix
-    client.add_allowed_prefix(&admin, &String::from_slice(&env, "u4pruy"));
+    client.add_allowed_prefix(&admin, &String::from_str(&env, "u4pruy"));
     (env, client)
 }
 
-fn admin_of(env: &Env, client: &LocationVerifierClient) -> Address {
+fn admin_of(client: &LocationVerifierClient) -> Address {
     client.get_admin().unwrap()
 }
 
@@ -37,57 +33,57 @@ fn admin_of(env: &Env, client: &LocationVerifierClient) -> Address {
 fn test_valid_geohash7_in_prefix_passes() {
     let (env, client) = setup();
     // "u4pruyd" starts with "u4pruy" — length 7, all valid chars
-    assert!(client.is_valid_geohash(&String::from_slice(&env, "u4pruyd")));
+    assert!(client.is_valid_geohash(&String::from_str(&env, "u4pruyd")));
 }
 
 #[test]
 fn test_length_6_fails() {
     let (env, client) = setup();
-    assert!(!client.is_valid_geohash(&String::from_slice(&env, "u4pruy")));
+    assert!(!client.is_valid_geohash(&String::from_str(&env, "u4pruy")));
 }
 
 #[test]
 fn test_length_8_fails() {
     let (env, client) = setup();
-    assert!(!client.is_valid_geohash(&String::from_slice(&env, "u4pruyd0")));
+    assert!(!client.is_valid_geohash(&String::from_str(&env, "u4pruyd0")));
 }
 
 #[test]
 fn test_invalid_char_a_fails() {
     let (env, client) = setup();
     // replace last char with 'a' (excluded from geohash alphabet)
-    assert!(!client.is_valid_geohash(&String::from_slice(&env, "u4pruya")));
+    assert!(!client.is_valid_geohash(&String::from_str(&env, "u4pruya")));
 }
 
 #[test]
 fn test_invalid_char_i_fails() {
     let (env, client) = setup();
-    assert!(!client.is_valid_geohash(&String::from_slice(&env, "u4pruyi")));
+    assert!(!client.is_valid_geohash(&String::from_str(&env, "u4pruyi")));
 }
 
 #[test]
 fn test_invalid_char_l_fails() {
     let (env, client) = setup();
-    assert!(!client.is_valid_geohash(&String::from_slice(&env, "u4pruyl")));
+    assert!(!client.is_valid_geohash(&String::from_str(&env, "u4pruyl")));
 }
 
 #[test]
 fn test_invalid_char_o_fails() {
     let (env, client) = setup();
-    assert!(!client.is_valid_geohash(&String::from_slice(&env, "u4pruyo")));
+    assert!(!client.is_valid_geohash(&String::from_str(&env, "u4pruyo")));
 }
 
 #[test]
 fn test_valid_chars_but_not_in_allowed_prefix_fails() {
     let (env, client) = setup();
     // "dr5ru7k" is a valid geohash-7 but prefix "dr5ru7" is not allowed
-    assert!(!client.is_valid_geohash(&String::from_slice(&env, "dr5ru7k")));
+    assert!(!client.is_valid_geohash(&String::from_str(&env, "dr5ru7k")));
 }
 
 #[test]
 fn test_empty_string_fails() {
     let (env, client) = setup();
-    assert!(!client.is_valid_geohash(&String::from_slice(&env, "")));
+    assert!(!client.is_valid_geohash(&String::from_str(&env, "")));
 }
 
 // ──────────────────────────────────────────────
@@ -97,25 +93,25 @@ fn test_empty_string_fails() {
 #[test]
 fn test_admin_adds_prefix_successfully() {
     let (env, client) = setup();
-    let admin = admin_of(&env, &client);
-    client.add_allowed_prefix(&admin, &String::from_slice(&env, "dr5ru7"));
-    assert!(client.is_valid_geohash(&String::from_slice(&env, "dr5ru7k")));
+    let admin = admin_of(&client);
+    client.add_allowed_prefix(&admin, &String::from_str(&env, "dr5ru7"));
+    assert!(client.is_valid_geohash(&String::from_str(&env, "dr5ru7k")));
 }
 
 #[test]
 #[should_panic(expected = "prefix length cannot exceed 6")]
 fn test_prefix_longer_than_6_rejected() {
     let (env, client) = setup();
-    let admin = admin_of(&env, &client);
-    client.add_allowed_prefix(&admin, &String::from_slice(&env, "u4pruy0"));
+    let admin = admin_of(&client);
+    client.add_allowed_prefix(&admin, &String::from_str(&env, "u4pruy0"));
 }
 
 #[test]
 #[should_panic(expected = "prefix cannot be empty")]
 fn test_empty_prefix_rejected() {
     let (env, client) = setup();
-    let admin = admin_of(&env, &client);
-    client.add_allowed_prefix(&admin, &String::from_slice(&env, ""));
+    let admin = admin_of(&client);
+    client.add_allowed_prefix(&admin, &String::from_str(&env, ""));
 }
 
 #[test]
@@ -123,7 +119,7 @@ fn test_empty_prefix_rejected() {
 fn test_non_admin_add_rejected() {
     let (env, client) = setup();
     let non_admin = Address::generate(&env);
-    client.add_allowed_prefix(&non_admin, &String::from_slice(&env, "dr5ru7"));
+    client.add_allowed_prefix(&non_admin, &String::from_str(&env, "dr5ru7"));
 }
 
 // ──────────────────────────────────────────────
@@ -133,19 +129,19 @@ fn test_non_admin_add_rejected() {
 #[test]
 fn test_admin_removes_existing_prefix() {
     let (env, client) = setup();
-    let admin = admin_of(&env, &client);
+    let admin = admin_of(&client);
     // prefix "u4pruy" was added in setup
-    client.remove_allowed_prefix(&admin, &String::from_slice(&env, "u4pruy"));
+    client.remove_allowed_prefix(&admin, &String::from_str(&env, "u4pruy"));
     // now the geohash should no longer be valid
-    assert!(!client.is_valid_geohash(&String::from_slice(&env, "u4pruyd")));
+    assert!(!client.is_valid_geohash(&String::from_str(&env, "u4pruyd")));
 }
 
 #[test]
 #[should_panic(expected = "prefix not found")]
 fn test_remove_nonexistent_prefix_panics() {
     let (env, client) = setup();
-    let admin = admin_of(&env, &client);
-    client.remove_allowed_prefix(&admin, &String::from_slice(&env, "xxxxxx"));
+    let admin = admin_of(&client);
+    client.remove_allowed_prefix(&admin, &String::from_str(&env, "xxxxxx"));
 }
 
 #[test]
@@ -153,14 +149,18 @@ fn test_remove_nonexistent_prefix_panics() {
 fn test_non_admin_remove_rejected() {
     let (env, client) = setup();
     let non_admin = Address::generate(&env);
-    client.remove_allowed_prefix(&non_admin, &String::from_slice(&env, "u4pruy"));
+    client.remove_allowed_prefix(&non_admin, &String::from_str(&env, "u4pruy"));
 }
 
 // ──────────────────────────────────────────────
 // verify_and_post integration tests
 // ──────────────────────────────────────────────
 
-fn setup_with_registry() -> (Env, LocationVerifierClient<'static>, GistRegistryClient<'static>) {
+fn setup_with_registry() -> (
+    Env,
+    LocationVerifierClient<'static>,
+    GistRegistryClient<'static>,
+) {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
 
@@ -175,8 +175,8 @@ fn setup_with_registry() -> (Env, LocationVerifierClient<'static>, GistRegistryC
     let lv_client = LocationVerifierClient::new(&env, &lv_id);
     let lv_admin = Address::generate(&env);
     lv_client.initialize(&lv_admin);
-    lv_client.add_allowed_prefix(&lv_admin, &String::from_slice(&env, "u4pruy"));
-    lv_client.set_registry_address(&reg_id);
+    lv_client.add_allowed_prefix(&lv_admin, &String::from_str(&env, "u4pruy"));
+    lv_client.set_registry_address(&lv_admin, &reg_id);
 
     (env, lv_client, reg_client)
 }
@@ -186,7 +186,7 @@ fn test_verify_and_post_valid_returns_gist_id() {
     let (env, lv_client, _) = setup_with_registry();
     let author = Address::generate(&env);
     let cid = Bytes::from_slice(&env, b"QmTestCid1234567890123456789012345678901234");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
 
     let gist_id = lv_client.verify_and_post(&geohash, &cid, &author, &None);
     assert_eq!(gist_id, 1u64);
@@ -198,7 +198,7 @@ fn test_verify_and_post_invalid_geohash_reverts() {
     let (env, lv_client, _) = setup_with_registry();
     let author = Address::generate(&env);
     let cid = Bytes::from_slice(&env, b"QmTestCid1234567890123456789012345678901234");
-    let geohash = String::from_slice(&env, "dr5ru7k"); // not in allowed prefix
+    let geohash = String::from_str(&env, "dr5ru7k"); // not in allowed prefix
 
     lv_client.verify_and_post(&geohash, &cid, &author, &None);
 }
@@ -208,7 +208,7 @@ fn test_verify_and_post_passes_correct_params() {
     let (env, lv_client, reg_client) = setup_with_registry();
     let author = Address::generate(&env);
     let cid = Bytes::from_slice(&env, b"QmTestCid1234567890123456789012345678901234");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
 
     let gist_id = lv_client.verify_and_post(&geohash, &cid, &author, &None);
 
@@ -224,7 +224,7 @@ fn test_verify_and_post_increments_gist_id() {
     let (env, lv_client, _) = setup_with_registry();
     let author = Address::generate(&env);
     let cid = Bytes::from_slice(&env, b"QmTestCid1234567890123456789012345678901234");
-    let geohash = String::from_slice(&env, "u4pruyd");
+    let geohash = String::from_str(&env, "u4pruyd");
 
     let id1 = lv_client.verify_and_post(&geohash, &cid, &author, &None);
     let id2 = lv_client.verify_and_post(&geohash, &cid, &author, &None);
@@ -232,58 +232,31 @@ fn test_verify_and_post_increments_gist_id() {
 }
 
 #[test]
-fn test_invalid_character() {
-    let (env, client, admin) = setup();
+fn test_add_and_remove_prefix_updates_allowed_list() {
+    let (env, client) = setup();
+    let admin = admin_of(&client);
 
-    client.add_allowed_prefix(
-        &admin,
-        &String::from_str(&env, "s17"),
-    );
+    client.add_allowed_prefix(&admin, &String::from_str(&env, "s17"));
+    // "u4pruy" (added in setup) + "s17"
+    assert_eq!(client.get_allowed_prefixes().len(), 2);
 
-    assert!(
-        !client.is_valid_geohash(
-            &String::from_str(&env, "s17abi")
-        )
-    );
+    client.remove_allowed_prefix(&admin, &String::from_str(&env, "s17"));
+    assert_eq!(client.get_allowed_prefixes().len(), 1);
 }
 
 #[test]
-fn test_outside_allowed_prefix() {
-    let (env, client, admin) = setup();
-
-    client.add_allowed_prefix(
-        &admin,
-        &String::from_str(&env, "s17"),
-    );
-
-    assert!(
-        !client.is_valid_geohash(
-            &String::from_str(&env, "u44abcd")
-        )
-    );
+#[should_panic(expected = "caller is not the admin")]
+fn test_non_admin_set_registry_address_rejected() {
+    let (env, client) = setup();
+    let non_admin = Address::generate(&env);
+    let reg_id = Address::generate(&env);
+    client.set_registry_address(&non_admin, &reg_id);
 }
 
 #[test]
-fn test_add_and_remove_prefix() {
-    let (env, client, admin) = setup();
-
-    client.add_allowed_prefix(
-        &admin,
-        &String::from_str(&env, "s17"),
-    );
-
-    assert_eq!(
-        client.get_allowed_prefixes().len(),
-        1
-    );
-
-    client.remove_allowed_prefix(
-        &admin,
-        &String::from_str(&env, "s17"),
-    );
-
-    assert_eq!(
-        client.get_allowed_prefixes().len(),
-        0
-    );
+#[should_panic(expected = "caller is not the admin")]
+fn test_non_admin_update_boundaries_rejected() {
+    let (env, client) = setup();
+    let non_admin = Address::generate(&env);
+    client.update_boundaries(&non_admin, &String::from_str(&env, "s17"));
 }

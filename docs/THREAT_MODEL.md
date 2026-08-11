@@ -65,29 +65,30 @@ far-future expiry that consume permanent ledger storage.
 - All TTL and timestamp arithmetic in GistRegistry uses `checked_add`, `checked_sub`, and
   `checked_mul`; overflow panics rather than wrapping.
 - `post_gist` explicitly bounds expiry to ≤ 168 hours from the current ledger timestamp.
-- GistVault (when implemented) must use `i128::checked_add` for all balance updates and
-  reject deposits that would overflow the author's pending balance.
+- GistVault uses `i128::checked_add` for all pending-balance and gist-total updates, and
+  panics on overflow rather than wrapping.
 
-**Residual Risk:** Low in GistRegistry (fully mitigated). GistVault overflow protection
-depends on correct implementation.
+**Residual Risk:** Low in both GistRegistry and GistVault (checked arithmetic throughout).
 
 ---
 
 ## Threat 4 — Location Boundary Manipulation (Open Write on LocationVerifier)
 
-**Vector:** Any account calls `add_allowed_prefix`, `update_boundaries`, or
-`set_registry_address` without authentication, overwriting geohash boundary definitions or
-pointing the verifier at a malicious registry.
+**Vector:** Any account calls `add_allowed_prefix`, `remove_allowed_prefix`,
+`update_boundaries`, or `set_registry_address` without authentication, overwriting geohash
+boundary definitions or pointing the verifier at a malicious registry.
 
 **Impact:** Region restrictions bypassed; spam gists accepted from any coordinate; or
 GistRegistry association corrupted.
 
-**Mitigations (required before production):**
-- Add an admin address to LocationVerifier (identical pattern to GistRegistry).
-- Gate `add_allowed_prefix`, `update_boundaries`, and `set_registry_address` behind
-  `admin.require_auth()` and stored-address verification.
+**Mitigations:**
+- LocationVerifier has an admin address (identical pattern to GistRegistry), set via
+  `initialize`.
+- `add_allowed_prefix`, `remove_allowed_prefix`, `update_boundaries`, and
+  `set_registry_address` are gated behind `admin.require_auth()` and stored-address
+  verification.
 
-**Residual Risk:** High in current code. These functions are completely unprotected.
+**Residual Risk:** Low. These functions are protected.
 
 ---
 
@@ -124,10 +125,12 @@ arbitrary withdrawals from GistVault).
 | GistRegistry | `post_gist` | Author | Protected |
 | GistRegistry | `expire_gist` | Author | Protected |
 | GistRegistry | `extend_gist_ttl` | Author | Protected |
-| GistVault | `withdraw_tips` | Author (intended) | **UNIMPLEMENTED** |
-| LocationVerifier | `add_allowed_prefix` | Admin (intended) | **UNPROTECTED** |
-| LocationVerifier | `update_boundaries` | Admin (intended) | **UNPROTECTED** |
-| LocationVerifier | `set_registry_address` | Admin (intended) | **UNPROTECTED** |
+| GistVault | `claim_tips` | Author | Protected |
+| GistVault | `tip_author` | Tipper | Protected |
+| LocationVerifier | `add_allowed_prefix` | Admin | Protected |
+| LocationVerifier | `remove_allowed_prefix` | Admin | Protected |
+| LocationVerifier | `update_boundaries` | Admin | Protected |
+| LocationVerifier | `set_registry_address` | Admin | Protected |
 
 ---
 
