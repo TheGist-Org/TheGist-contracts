@@ -40,7 +40,7 @@ Validates that a submitted geohash falls within an allowed geographic boundary. 
 ## Prerequisites
 
 - **Rust** — [rustup.rs](https://rustup.rs)
-- **wasm32 target**: `rustup target add wasm32-unknown-unknown`
+- **wasm32 target**: `rustup target add wasm32v1-none`
 - **Soroban CLI**: `cargo install --locked stellar-cli --features opt`
 
 ---
@@ -52,10 +52,10 @@ own `.wasm` artifact — a single deployed Soroban contract can only export one 
 functions, so the three contracts can't share a build.
 
 ```bash
-cargo build --workspace --target wasm32-unknown-unknown --release
+cargo build --workspace --target wasm32v1-none --release
 ```
 
-Compiled `.wasm` artifacts are output to `target/wasm32-unknown-unknown/release/`:
+Compiled `.wasm` artifacts are output to `target/wasm32v1-none/release/`:
 `gist_registry.wasm`, `gist_vault.wasm`, `location_verifier.wasm`. `make build` copies them
 into `artifacts/`.
 

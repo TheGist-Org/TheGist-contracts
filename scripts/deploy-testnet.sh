@@ -8,7 +8,7 @@ NETWORK_PASSPHRASE="${NETWORK_PASSPHRASE:-Test SDF Network ; September 2015}"
 DEPLOYER="${DEPLOYER:-alice}"
 DEFAULT_ALLOWED_PREFIX="${DEFAULT_ALLOWED_PREFIX:-u4pruy}"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.contracts}"
-WASM_DIR="${WASM_DIR:-$ROOT_DIR/target/wasm32-unknown-unknown/release}"
+WASM_DIR="${WASM_DIR:-$ROOT_DIR/target/wasm32v1-none/release}"
 GIST_REGISTRY_WASM="${GIST_REGISTRY_WASM:-$WASM_DIR/gist_registry.wasm}"
 GIST_VAULT_WASM="${GIST_VAULT_WASM:-$WASM_DIR/gist_vault.wasm}"
 LOCATION_VERIFIER_WASM="${LOCATION_VERIFIER_WASM:-$WASM_DIR/location_verifier.wasm}"
@@ -24,7 +24,7 @@ stellar network add "$NETWORK_NAME" \
   --rpc-url "$RPC_URL" \
   --network-passphrase "$NETWORK_PASSPHRASE" >/dev/null 2>&1 || true
 
-cargo build --workspace --target wasm32-unknown-unknown --release
+cargo build --workspace --target wasm32v1-none --release
 
 stellar keys generate --global "$DEPLOYER" >/dev/null 2>&1 || true
 stellar keys fund "$DEPLOYER" --network "$NETWORK_NAME"

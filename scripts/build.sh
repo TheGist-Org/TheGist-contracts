@@ -2,11 +2,11 @@
 set -euo pipefail
 
 ARTIFACTS_DIR="artifacts"
-WASM_DIR="target/wasm32-unknown-unknown/release"
+WASM_DIR="target/wasm32v1-none/release"
 CONTRACTS=(gist_registry gist_vault location_verifier)
 
-echo "==> Building contracts (wasm32-unknown-unknown, release)..."
-cargo build --workspace --target wasm32-unknown-unknown --release
+echo "==> Building contracts (wasm32v1-none, release)..."
+cargo build --workspace --target wasm32v1-none --release
 
 mkdir -p "$ARTIFACTS_DIR"
 for c in "${CONTRACTS[@]}"; do
