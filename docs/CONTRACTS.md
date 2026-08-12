@@ -29,17 +29,15 @@ See [`LOCATION_VERIFIER.md`](./LOCATION_VERIFIER.md) for the full function refer
 
 An optional tipping vault intended to let users send anonymous XLM tips to gist authors, which authors can later withdraw.
 
-**Current status:** `GistVault` is a stub. Every function (`__init`, `deposit_tip`, `withdraw_tips`, `get_tip_balance`) exists with the correct signature but contains only placeholder logic — no value is actually transferred, stored, or withdrawn yet. Treat the behavior described in [`GIST_VAULT.md`](./GIST_VAULT.md) as the intended design, not the current implementation, until this contract is completed in a future update.
-
-See [`GIST_VAULT.md`](./GIST_VAULT.md) for the full function reference.
+**Current status:** `GistVault` is fully implemented. `tip_author` transfers tokens from a tipper into escrow and credits the recipient's pending balance and the gist's running tip total; `claim_tips` lets the author withdraw. See [`GIST_VAULT.md`](./GIST_VAULT.md) for the full function reference.
 
 ## How they interact
 
-- `LocationVerifier` holds a reference to `GistRegistry`'s address via `set_registry_address`, but no function in `GistRegistry` currently calls back into `LocationVerifier`. The geohash validation step is expected to happen client-side or indexer-side today: the client should call `verify_geohash` before calling `post_gist`.
-- `GistVault` takes a `gist_id` as a parameter in its functions, implying it's meant to look up gists in `GistRegistry`, but no actual cross-contract call exists in the current stub implementation.
-- None of the three contracts call each other automatically on-chain today. Wiring between them is a client or indexer responsibility until further development happens.
+- `LocationVerifier` holds a reference to `GistRegistry`'s address via `set_registry_address`. `LocationVerifier.verify_and_post` uses it to cross-contract call `GistRegistry.post_gist` directly, so a client can validate-and-post in a single transaction instead of two separate calls.
+- `GistVault` takes a `gist_id` as a parameter in `tip_author`/`get_total_tips_for_gist` to track per-gist tip totals, but does not itself call into `GistRegistry` — it trusts the caller to supply a real `gist_id`.
+- Each contract is deployed as its own wasm artifact (see the repo's [Project Layout](../README.md#project-layout)); none of the three share a build.
 
-In short: `GistRegistry` is the source of truth for gist data and is fully self-contained. `LocationVerifier` is a fully working but separately-called validation step. `GistVault` is a planned but not-yet-functional add-on.
+In short: `GistRegistry` is the source of truth for gist data and is fully self-contained. `LocationVerifier` is a fully working validation step that can optionally post on the caller's behalf. `GistVault` is a fully working, independent tipping add-on.
 
 ## Deployment order and initialization sequence
 

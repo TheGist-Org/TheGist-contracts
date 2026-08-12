@@ -78,25 +78,23 @@ Author lists are retained for 30 days after the last write.
 
 ## GistVault
 
-> **Status:** Placeholder implementation. The functions below contain no logic; tip
-> accounting is not yet live. This section documents the intended invariants that must be
-> enforced when the implementation is completed.
+Implemented. Tips are transferred via the token contract passed to `initialize` and held in
+this contract's own token balance until claimed.
 
-### Intended Invariants
+### Invariants
 
-1. **No overflow on tip amounts.** Tip and balance values use `i128` (Stellar native token
-   standard). All arithmetic must use checked operations.
-2. **No double-spend on withdrawal.** Balances must be zeroed atomically with the transfer in
-   a single storage write before the token transfer executes.
+1. **No overflow on tip amounts.** Tip and balance values use `i128`. All arithmetic uses
+   `checked_add`.
+2. **No double-spend on claim.** `claim_tips` zeroes the pending balance in storage before
+   the token transfer executes.
 3. **Balance invariant.** At all times:
    `contract_token_balance == Σ pending_tip_balances[author]`
    Any deviation indicates a bug or unexpected direct transfer.
 
-### Required Auth (when implemented)
+### Required Auth
 
-- `withdraw_tips(author)` must call `author.require_auth()` before any transfer.
-- `deposit_tip` does not require author auth but must verify the transferred amount matches
-  `amount`.
+- `tip_author` requires `tipper.require_auth()`.
+- `claim_tips(recipient)` requires `recipient.require_auth()` before any transfer.
 
 ---
 
@@ -106,14 +104,10 @@ Author lists are retained for 30 days after the last write.
 
 | Function | Access | Notes |
 |----------|--------|-------|
-| `add_allowed_prefix` | **No auth — open write** | See finding below |
-| `update_boundaries` | **No auth — open write** | See finding below |
-| `set_registry_address` | **No auth — open write** | See finding below |
-
-> **Finding:** `add_allowed_prefix`, `update_boundaries`, and `set_registry_address` do not
-> call `require_auth()`. Any account can currently modify boundary definitions or overwrite
-> the registry address. These functions must be gated behind an admin address before
-> production deployment.
+| `add_allowed_prefix` | Admin | Verified against stored admin address |
+| `remove_allowed_prefix` | Admin | Verified against stored admin address |
+| `update_boundaries` | Admin | Verified against stored admin address |
+| `set_registry_address` | Admin | Verified against stored admin address |
 
 ### Validation
 

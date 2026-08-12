@@ -7,7 +7,7 @@ This repository includes two helper scripts for Soroban testnet deployment:
 
 ## Prerequisites
 
-- `rustup target add wasm32-unknown-unknown`
+- `rustup target add wasm32v1-none`
 - `cargo install --locked stellar-cli --features opt`
 - A funded Soroban testnet keypair for the deployer account
 
@@ -21,11 +21,13 @@ cp .env.contracts.example .env.contracts
 The script:
 
 1. Adds the testnet network if it is not already configured.
-2. Builds the contract wasm artifact.
+2. Builds all three contract wasm artifacts (one crate per contract).
 3. Creates or funds the deployer keypair.
-4. Deploys `GistRegistry`, `GistVault`, and `LocationVerifier`.
-5. Configures `LocationVerifier` with the deployed registry address.
-6. Initializes `GistRegistry` with the deployer address as admin.
+4. Deploys `GistRegistry`, `GistVault`, and `LocationVerifier` as three separate contract
+   instances, each from its own wasm.
+5. Initializes `GistRegistry` and `LocationVerifier` with the deployer address as admin, and
+   `GistVault` with the native XLM token (SAC) address.
+6. Configures `LocationVerifier` with the deployed registry address.
 7. Adds the default geohash prefix.
 8. Writes the resulting IDs to `.env.contracts`.
 
@@ -39,7 +41,7 @@ The verify script checks:
 
 - `GistRegistry.get_version()`
 - `LocationVerifier.get_registry_address()`
-- `GistVault.get_tip_balance()`
+- `GistVault.get_pending_balance()`
 - `LocationVerifier.verify_geohash()`
 
 ## Contract IDs

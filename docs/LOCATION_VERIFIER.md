@@ -34,17 +34,17 @@ In practice: use `add_allowed_prefix` repeatedly during initial setup to build a
 
 ## Full function reference
 
-### `__init(env: Env)`
-Initializes the contract. If `AllowedPrefixes` has not already been set, initializes it to an empty list. Safe to call more than once — it is a no-op if already initialized.
-- **Inputs:** none beyond the environment
+### `initialize(env: Env, admin: Address)`
+Sets the admin address and initializes `AllowedPrefixes` to an empty list. Must be called once before any admin-gated function.
+- **Inputs:** `admin: Address`
 - **Output:** none
-- **Errors:** none
+- **Errors:** panics with `"already initialized"` if called a second time.
 
-### `set_registry_address(env: Env, registry_address: Address)`
+### `set_registry_address(env: Env, caller: Address, registry_address: Address)`
 Stores the `GistRegistry` contract address for later reference.
-- **Inputs:** `registry_address: Address`
+- **Inputs:** `caller: Address` (must be admin), `registry_address: Address`
 - **Output:** none
-- **Errors:** none. Does not validate that the address is actually a deployed `GistRegistry` contract.
+- **Errors:** panics with `"caller is not the admin"` if `caller` isn't the stored admin. Does not validate that `registry_address` is actually a deployed `GistRegistry` contract.
 
 ### `get_registry_address(env: Env) -> Option<Address>`
 Reads the stored registry address, if one has been set.
@@ -52,11 +52,11 @@ Reads the stored registry address, if one has been set.
 - **Output:** `Some(Address)` if set, `None` if `set_registry_address` was never called
 - **Errors:** none
 
-### `add_allowed_prefix(env: Env, prefix: String)`
+### `add_allowed_prefix(env: Env, caller: Address, prefix: String)`
 Appends a new geohash prefix to the allow-list.
-- **Inputs:** `prefix: String`
+- **Inputs:** `caller: Address` (must be admin), `prefix: String` (1–6 chars)
 - **Output:** none
-- **Errors:** none. No validation on prefix length or format — an empty string or an overly long string will be accepted and stored as-is.
+- **Errors:** panics with `"caller is not the admin"`, `"prefix cannot be empty"`, or `"prefix length cannot exceed 6"`.
 
 ### `verify_geohash(env: Env, geohash: String) -> bool`
 Checks whether the given geohash starts with any currently allowed prefix.
@@ -64,11 +64,11 @@ Checks whether the given geohash starts with any currently allowed prefix.
 - **Output:** `true` if the geohash matches at least one allowed prefix, `false` otherwise (including when the allow-list is empty)
 - **Errors:** none — returns `false` rather than panicking on no match
 
-### `update_boundaries(env: Env, boundaries: String)`
+### `update_boundaries(env: Env, caller: Address, boundaries: String)`
 Replaces the entire allowed-prefix list with a single prefix.
-- **Inputs:** `boundaries: String`
+- **Inputs:** `caller: Address` (must be admin), `boundaries: String`
 - **Output:** none
-- **Errors:** none. This is destructive — any existing prefixes added via `add_allowed_prefix` are lost.
+- **Errors:** panics with `"caller is not the admin"`. This is destructive — any existing prefixes added via `add_allowed_prefix` are lost.
 
 ### `get_boundaries(env: Env) -> String`
 Returns the first prefix in the allowed-prefix list.

@@ -8,10 +8,10 @@ NETWORK_PASSPHRASE="${NETWORK_PASSPHRASE:-Test SDF Network ; September 2015}"
 DEPLOYER="${DEPLOYER:-alice}"
 DEFAULT_ALLOWED_PREFIX="${DEFAULT_ALLOWED_PREFIX:-u4pruy}"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.contracts}"
-WASM_PATH="${WASM_PATH:-$ROOT_DIR/target/wasm32-unknown-unknown/release/the_gist_contracts.wasm}"
-GIST_REGISTRY_WASM="${GIST_REGISTRY_WASM:-$WASM_PATH}"
-GIST_VAULT_WASM="${GIST_VAULT_WASM:-$WASM_PATH}"
-LOCATION_VERIFIER_WASM="${LOCATION_VERIFIER_WASM:-$WASM_PATH}"
+WASM_DIR="${WASM_DIR:-$ROOT_DIR/target/wasm32v1-none/release}"
+GIST_REGISTRY_WASM="${GIST_REGISTRY_WASM:-$WASM_DIR/gist_registry.wasm}"
+GIST_VAULT_WASM="${GIST_VAULT_WASM:-$WASM_DIR/gist_vault.wasm}"
+LOCATION_VERIFIER_WASM="${LOCATION_VERIFIER_WASM:-$WASM_DIR/location_verifier.wasm}"
 
 command -v stellar >/dev/null 2>&1 || {
   echo "stellar CLI is required" >&2
@@ -24,7 +24,7 @@ stellar network add "$NETWORK_NAME" \
   --rpc-url "$RPC_URL" \
   --network-passphrase "$NETWORK_PASSPHRASE" >/dev/null 2>&1 || true
 
-cargo build --target wasm32-unknown-unknown --release
+cargo build --workspace --target wasm32v1-none --release
 
 stellar keys generate --global "$DEPLOYER" >/dev/null 2>&1 || true
 stellar keys fund "$DEPLOYER" --network "$NETWORK_NAME"
@@ -43,12 +43,7 @@ GIST_REGISTRY_CONTRACT_ID="$(deploy_contract "$GIST_REGISTRY_WASM" | tail -n 1 |
 GIST_VAULT_CONTRACT_ID="$(deploy_contract "$GIST_VAULT_WASM" | tail -n 1 | tr -d '\r')"
 LOCATION_VERIFIER_CONTRACT_ID="$(deploy_contract "$LOCATION_VERIFIER_WASM" | tail -n 1 | tr -d '\r')"
 
-stellar contract invoke \
-  --id "$LOCATION_VERIFIER_CONTRACT_ID" \
-  --source "$DEPLOYER" \
-  --network "$NETWORK_NAME" \
-  -- set_registry_address \
-  --registry_address "$GIST_REGISTRY_CONTRACT_ID"
+NATIVE_TOKEN_ID="$(stellar contract asset id --asset native --network "$NETWORK_NAME")"
 
 stellar contract invoke \
   --id "$GIST_REGISTRY_CONTRACT_ID" \
@@ -61,7 +56,30 @@ stellar contract invoke \
   --id "$LOCATION_VERIFIER_CONTRACT_ID" \
   --source "$DEPLOYER" \
   --network "$NETWORK_NAME" \
+  -- initialize \
+  --admin "$DEPLOYER_ADDRESS"
+
+stellar contract invoke \
+  --id "$GIST_VAULT_CONTRACT_ID" \
+  --source "$DEPLOYER" \
+  --network "$NETWORK_NAME" \
+  -- initialize \
+  --token "$NATIVE_TOKEN_ID"
+
+stellar contract invoke \
+  --id "$LOCATION_VERIFIER_CONTRACT_ID" \
+  --source "$DEPLOYER" \
+  --network "$NETWORK_NAME" \
+  -- set_registry_address \
+  --caller "$DEPLOYER_ADDRESS" \
+  --registry_address "$GIST_REGISTRY_CONTRACT_ID"
+
+stellar contract invoke \
+  --id "$LOCATION_VERIFIER_CONTRACT_ID" \
+  --source "$DEPLOYER" \
+  --network "$NETWORK_NAME" \
   -- add_allowed_prefix \
+  --caller "$DEPLOYER_ADDRESS" \
   --prefix "$DEFAULT_ALLOWED_PREFIX"
 
 cat > "$ENV_FILE" <<EOF

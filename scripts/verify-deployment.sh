@@ -37,7 +37,7 @@ contract_invoke() {
 
 registry_version="$(contract_invoke "$GIST_REGISTRY_CONTRACT_ID" get_version | tail -n 1 | tr -d '\r')"
 configured_registry="$(contract_invoke "$LOCATION_VERIFIER_CONTRACT_ID" get_registry_address | tail -n 1 | tr -d '\r')"
-vault_balance="$(contract_invoke "$GIST_VAULT_CONTRACT_ID" get_tip_balance --author "$DEPLOYER_ADDRESS" | tail -n 1 | tr -d '\r')"
+vault_balance="$(contract_invoke "$GIST_VAULT_CONTRACT_ID" get_pending_balance --author "$DEPLOYER_ADDRESS" | tail -n 1 | tr -d '\r')"
 prefix_ok="$(contract_invoke "$LOCATION_VERIFIER_CONTRACT_ID" verify_geohash --geohash "${DEFAULT_ALLOWED_PREFIX}x" | tail -n 1 | tr -d '\r')"
 
 if [[ "$configured_registry" != "$GIST_REGISTRY_CONTRACT_ID" ]]; then

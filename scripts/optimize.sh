@@ -2,19 +2,23 @@
 set -euo pipefail
 
 ARTIFACTS_DIR="artifacts"
-INPUT="$ARTIFACTS_DIR/the_gist_contracts.wasm"
-OUTPUT="$ARTIFACTS_DIR/the_gist_contracts.optimized.wasm"
+CONTRACTS=(gist_registry gist_vault location_verifier)
 
-if [ ! -f "$INPUT" ]; then
-  echo "Error: $INPUT not found. Run 'make build' first."
-  exit 1
-fi
+for c in "${CONTRACTS[@]}"; do
+  input="$ARTIFACTS_DIR/$c.wasm"
+  output="$ARTIFACTS_DIR/$c.optimized.wasm"
 
-echo "==> Optimizing WASM with wasm-opt..."
-BEFORE=$(du -sh "$INPUT" | cut -f1)
-wasm-opt -Oz --strip-debug "$INPUT" -o "$OUTPUT"
-AFTER=$(du -sh "$OUTPUT" | cut -f1)
+  if [ ! -f "$input" ]; then
+    echo "Error: $input not found. Run 'make build' first."
+    exit 1
+  fi
 
-echo "    Before: $BEFORE"
-echo "    After:  $AFTER"
-echo "==> Optimized WASM written to $OUTPUT"
+  echo "==> Optimizing $c.wasm with wasm-opt..."
+  before=$(du -sh "$input" | cut -f1)
+  wasm-opt -Oz --strip-debug "$input" -o "$output"
+  after=$(du -sh "$output" | cut -f1)
+
+  echo "    Before: $before"
+  echo "    After:  $after"
+  echo "==> Optimized WASM written to $output"
+done

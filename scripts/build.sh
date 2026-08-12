@@ -2,13 +2,18 @@
 set -euo pipefail
 
 ARTIFACTS_DIR="artifacts"
-WASM="target/wasm32-unknown-unknown/release/the_gist_contracts.wasm"
+WASM_DIR="target/wasm32v1-none/release"
+CONTRACTS=(gist_registry gist_vault location_verifier)
 
-echo "==> Building contracts (wasm32-unknown-unknown, release)..."
-cargo build --target wasm32-unknown-unknown --release
+echo "==> Building contracts (wasm32v1-none, release)..."
+cargo build --workspace --target wasm32v1-none --release
 
 mkdir -p "$ARTIFACTS_DIR"
-cp "$WASM" "$ARTIFACTS_DIR/"
+for c in "${CONTRACTS[@]}"; do
+  cp "$WASM_DIR/$c.wasm" "$ARTIFACTS_DIR/"
+done
 
 echo "==> Build complete"
-echo "    Size: $(du -sh "$ARTIFACTS_DIR/the_gist_contracts.wasm" | cut -f1)"
+for c in "${CONTRACTS[@]}"; do
+  echo "    $c.wasm: $(du -sh "$ARTIFACTS_DIR/$c.wasm" | cut -f1)"
+done

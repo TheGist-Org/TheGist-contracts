@@ -40,28 +40,35 @@ Validates that a submitted geohash falls within an allowed geographic boundary. 
 ## Prerequisites
 
 - **Rust** — [rustup.rs](https://rustup.rs)
-- **wasm32 target**: `rustup target add wasm32-unknown-unknown`
+- **wasm32 target**: `rustup target add wasm32v1-none`
 - **Soroban CLI**: `cargo install --locked stellar-cli --features opt`
 
 ---
 
 ## Build
 
+This repo is a Cargo workspace with one crate per contract, so each contract builds to its
+own `.wasm` artifact — a single deployed Soroban contract can only export one contract's
+functions, so the three contracts can't share a build.
+
 ```bash
-cargo build --target wasm32-unknown-unknown --release
+cargo build --workspace --target wasm32v1-none --release
 ```
 
-Compiled `.wasm` artifacts are output to `target/wasm32-unknown-unknown/release/`.
+Compiled `.wasm` artifacts are output to `target/wasm32v1-none/release/`:
+`gist_registry.wasm`, `gist_vault.wasm`, `location_verifier.wasm`. `make build` copies them
+into `artifacts/`.
 
 ---
 
 ## Test
 
 ```bash
-cargo test
+cargo test --workspace
 ```
 
-Unit and integration tests live in `tests/`. All new contract logic must be covered before opening a PR.
+Unit and integration tests live alongside each contract crate, under
+`contracts/<contract>/tests/`. All new contract logic must be covered before opening a PR.
 
 ---
 
@@ -85,18 +92,23 @@ Use the scripted flow in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Project Layout
 
+Each contract is its own crate in a Cargo workspace, so it can be built and deployed as an
+independent `.wasm` artifact:
+
 ```
 TheGist-contracts/
-├── src/
-│   ├── gist_registry.rs     # GistRegistry contract
-│   ├── gist_vault.rs        # GistVault tipping contract
-│   ├── location_verifier.rs # LocationVerifier contract
-│   └── lib.rs               # Crate root
-├── tests/
-│   ├── gist_registry_test.rs
-│   ├── gist_vault_test.rs
-│   └── location_verifier_test.rs
-├── Cargo.toml
+├── contracts/
+│   ├── gist-registry/
+│   │   ├── src/lib.rs        # GistRegistry contract
+│   │   └── tests/gist_registry_test.rs
+│   ├── gist-vault/
+│   │   ├── src/lib.rs        # GistVault tipping contract
+│   │   ├── src/gist_vault_test.rs
+│   │   └── tests/gist_vault_test.rs
+│   └── location-verifier/
+│       ├── src/lib.rs        # LocationVerifier contract
+│       └── tests/location_verifier_test.rs
+├── Cargo.toml                 # workspace root
 └── README.md
 ```
 

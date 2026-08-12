@@ -1,11 +1,13 @@
 ARTIFACTS_DIR := artifacts
+WASM_DIR := target/wasm32v1-none/release
+CONTRACTS := gist_registry gist_vault location_verifier
 
 .PHONY: build optimize test clean
 
 build:
-	cargo build --target wasm32-unknown-unknown --release
+	cargo build --workspace --target wasm32v1-none --release
 	mkdir -p $(ARTIFACTS_DIR)
-	cp target/wasm32-unknown-unknown/release/the_gist_contracts.wasm $(ARTIFACTS_DIR)/
+	$(foreach c,$(CONTRACTS),cp $(WASM_DIR)/$(c).wasm $(ARTIFACTS_DIR)/;)
 	@echo "Build complete. Artifacts in $(ARTIFACTS_DIR)/"
 
 optimize: build

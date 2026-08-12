@@ -1,66 +1,59 @@
 # GistVault
 
-`GistVault` is an optional tipping vault, intended to let users send anonymous XLM tips to gist authors, which authors can then withdraw.
+`GistVault` is an optional tipping vault. Users can send anonymous tips (in any Soroban
+token, e.g. the native XLM SAC) to gist authors; tips accumulate in escrow (this contract's
+token balance) until the author claims them.
 
-## ⚠️ Current implementation status: stub
+This contract is fully implemented (not a stub).
 
-As of this writing, **`GistVault` is not functional**. Every function exists with its correct public signature, but each body is empty or contains only placeholder logic:
+## Storage layout
 
-```rust
-pub fn __init(env: Env) {
-    // Placeholder for initialization logic
-}
+Storage keys are defined by the internal `DataKey` enum, all in **instance** storage:
 
-pub fn deposit_tip(env: Env, gist_id: u64, amount: U256) {
-    // Placeholder for deposit logic
-}
+| Key | Type stored | Purpose |
+|---|---|---|
+| `DataKey::TokenAddress` | `Address` | The token contract used for tips, set once via `initialize` |
+| `DataKey::PendingBalance(Address)` | `i128` | An author's claimable tip balance |
+| `DataKey::GistTotalTips(u64)` | `i128` | Running total of tips a specific gist has received |
 
-pub fn withdraw_tips(env: Env, author: Address) {
-    // Placeholder for withdrawal logic
-}
+## Full function reference
 
-pub fn get_tip_balance(env: Env, author: Address) -> U256 {
-    // Placeholder for balance query
-    U256::from_u128(&env, 0)
-}
-```
+### `initialize(env: Env, token: Address)`
+Sets the token contract used for tips. Must be called once before any other function.
+- **Errors:** panics with `"already initialized"` if called a second time.
 
-No XLM is actually transferred, escrowed, or tracked. `deposit_tip` does not move any funds. `get_tip_balance` always returns `0` regardless of any prior deposits, because nothing is ever stored. `withdraw_tips` does nothing.
+### `tip_author(env: Env, tipper: Address, recipient: Address, gist_id: u64, amount: i128)`
+Transfers `amount` of the vault's token from `tipper` into escrow (this contract's own
+token balance), crediting it against `recipient`'s pending balance and `gist_id`'s running
+tip total.
+- **Auth:** requires `tipper.require_auth()`.
+- **Errors:** panics with `"tip amount must be positive"` if `amount <= 0`.
+- **Events:** emits `GistTipped` (see [EVENTS.md](./EVENTS.md)).
 
-This document describes the **intended design** based on the function signatures and the issue requirements, so contributors have a target to implement against — not the current behavior of the deployed contract. Do not rely on this contract for any tipping functionality until it has been implemented and this notice is removed.
+### `claim_tips(env: Env, recipient: Address) -> i128`
+Claims `recipient`'s full pending tip balance. The balance is zeroed in storage before the
+token transfer executes, so a reentrant or repeated call cannot double-spend it.
+- **Auth:** requires `recipient.require_auth()`.
+- **Output:** the amount claimed.
+- **Errors:** panics with `"no pending tips to claim"` if the pending balance is `0`.
+- **Events:** emits `TipsClaimed` (see [EVENTS.md](./EVENTS.md)).
 
-## Function reference (signatures only — behavior not yet implemented)
+### `get_pending_balance(env: Env, author: Address) -> i128`
+Returns the author's withdrawable (unclaimed) tip balance. Returns `0` if the author has
+never been tipped.
 
-### `__init(env: Env)`
-Intended to initialize the vault's storage (e.g. zeroing balances, setting up any admin/config). Currently a no-op.
-- **Inputs:** none beyond the environment
-- **Output:** none
-- **Errors:** none currently (no validation exists since there's no logic)
+### `get_total_tips_for_gist(env: Env, gist_id: u64) -> i128`
+Returns the running total of tips a specific gist has received (this does not reset when
+the recipient claims — it is a lifetime counter per `gist_id`, not per author).
 
-### `deposit_tip(env: Env, gist_id: u64, amount: U256)`
-Intended to let a tipper deposit XLM, associated with a specific gist (and therefore its author), into the vault. Currently does nothing — no funds are moved, no state is recorded.
-- **Inputs:** `gist_id: u64` — the gist being tipped; `amount: U256` — the tip amount
-- **Output:** none
-- **Errors:** none currently — notably, there is no check that `gist_id` actually exists in `GistRegistry`, and no check on `amount` (e.g. no minimum/maximum enforcement), because no logic has been written yet
+## Design notes
 
-### `withdraw_tips(env: Env, author: Address)`
-Intended to let an author withdraw their accumulated tip balance. Currently does nothing.
-- **Inputs:** `author: Address`
-- **Output:** none
-- **Errors:** none currently
-
-### `get_tip_balance(env: Env, author: Address) -> U256`
-Intended to return the author's withdrawable tip balance.
-- **Inputs:** `author: Address`
-- **Output:** currently **always** `U256::from_u128(&env, 0)`, regardless of input or any prior activity
-- **Errors:** none
-
-## Open design questions (for whoever implements this contract)
-
-The issue this documentation was written for asks for the following to be explained, but none of it can be answered honestly from the current code, since the logic doesn't exist yet:
-
-- **How tips flow from tipper to recipient** — not yet defined. Presumably `deposit_tip` would need to either hold XLM in contract-controlled escrow or use a token-transfer call, and associate the amount with the gist's `author` (looked up from `GistRegistry`, implying a cross-contract call that doesn't currently exist anywhere in this codebase).
-- **XLM amount limits and why** — not yet defined. No minimum or maximum is enforced anywhere in the current code.
-- **Claim process explanation** — not yet defined. `withdraw_tips` takes only an `author` address with no amount, suggesting a "withdraw full balance" design, but this is not confirmed since the body is empty.
-
-**Recommendation:** before this contract is implemented, the design questions above should be resolved (ideally in a design doc or the GitHub issue that tracks `GistVault`'s implementation) and this file should be rewritten to document the actual finished behavior, function by function, in the same style as [`GIST_REGISTRY.md`](./GIST_REGISTRY.md) and [`LOCATION_VERIFIER.md`](./LOCATION_VERIFIER.md).
+- **Anonymity:** the tipper's Stellar address is visible in the tip transaction and the
+  `GistTipped` event's `recipient`/`amount` fields, but nothing links the tip to the
+  recipient's identity beyond the transaction itself — the same anonymity model as the rest
+  of the protocol.
+- **Token choice:** the vault is token-agnostic; whichever token address is passed to
+  `initialize` is used for all transfers. In production this is expected to be the native
+  XLM Stellar Asset Contract (SAC).
+- **No overflow:** balance and total updates use `checked_add`, matching the invariant in
+  [SECURITY.md](./SECURITY.md).
