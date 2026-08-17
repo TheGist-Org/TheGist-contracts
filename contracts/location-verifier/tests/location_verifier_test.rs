@@ -260,3 +260,90 @@ fn test_non_admin_update_boundaries_rejected() {
     let non_admin = Address::generate(&env);
     client.update_boundaries(&non_admin, &String::from_str(&env, "s17"));
 }
+
+// ──────────────────────────────────────────────
+// set_admin tests
+// ──────────────────────────────────────────────
+
+#[test]
+fn test_set_admin() {
+    let (env, client) = setup();
+    let admin = admin_of(&client);
+    let new_admin = Address::generate(&env);
+    client.set_admin(&admin, &new_admin);
+    assert_eq!(client.get_admin(), Some(new_admin));
+}
+
+#[test]
+#[should_panic(expected = "caller is not the current admin")]
+fn test_set_admin_wrong_caller_panics() {
+    let (env, client) = setup();
+    let impostor = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    client.set_admin(&impostor, &new_admin);
+}
+
+#[test]
+#[should_panic(expected = "admin not initialized")]
+fn test_set_admin_before_init_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let id = env.register_contract(None, LocationVerifier);
+    let client = LocationVerifierClient::new(&env, &id);
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    client.set_admin(&admin, &new_admin);
+}
+
+// ──────────────────────────────────────────────
+// prefix list cap tests
+// ──────────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "prefix list is full (max 50)")]
+fn test_add_prefix_beyond_cap_panics() {
+    let (env, client) = setup();
+    let admin = admin_of(&client);
+    // "u4pruy" already added in setup, so we need 49 more to reach 50
+    for i in 0..49u32 {
+        let prefix = format!("p{:05}", i);
+        let s = String::from_str(&env, &prefix);
+        client.add_allowed_prefix(&admin, &s);
+    }
+    // This should panic — we're at 50 already
+    client.add_allowed_prefix(&admin, &String::from_str(&env, "extra"));
+}
+
+#[test]
+fn test_exactly_50_prefixes_succeeds() {
+    let (env, client) = setup();
+    let admin = admin_of(&client);
+    // "u4pruy" already added in setup, so we need 49 more
+    for i in 0..49u32 {
+        let prefix = format!("p{:05}", i);
+        let s = String::from_str(&env, &prefix);
+        client.add_allowed_prefix(&admin, &s);
+    }
+    assert_eq!(client.get_allowed_prefixes().len(), 50);
+}
+
+#[test]
+fn test_remove_prefix_allows_adding_again_within_cap() {
+    let (env, client) = setup();
+    let admin = admin_of(&client);
+    // Fill up to 50
+    for i in 0..49u32 {
+        let prefix = format!("q{:05}", i);
+        let s = String::from_str(&env, &prefix);
+        client.add_allowed_prefix(&admin, &s);
+    }
+    assert_eq!(client.get_allowed_prefixes().len(), 50);
+
+    // Remove one
+    client.remove_allowed_prefix(&admin, &String::from_str(&env, "q00000"));
+    assert_eq!(client.get_allowed_prefixes().len(), 49);
+
+    // Now we can add again
+    client.add_allowed_prefix(&admin, &String::from_str(&env, "newone"));
+    assert_eq!(client.get_allowed_prefixes().len(), 50);
+}

@@ -40,6 +40,18 @@ Sets the admin address and initializes `AllowedPrefixes` to an empty list. Must 
 - **Output:** none
 - **Errors:** panics with `"already initialized"` if called a second time.
 
+### `get_admin(env: Env) -> Option<Address>`
+- **Inputs:** none beyond the environment
+- **Output:** `Some(Address)` if initialized, `None` otherwise
+- **Errors:** none
+
+### `set_admin(env: Env, current_admin: Address, new_admin: Address)`
+Transfers admin rights to a new address.
+- **Inputs:** `current_admin: Address` (must match the stored admin and provide auth), `new_admin: Address`
+- **Output:** none
+- **Errors:** panics with `"admin not initialized"` if `initialize` was never called; panics with `"caller is not the current admin"` if `current_admin` doesn't match the stored admin
+- **Auth:** requires `current_admin.require_auth()`
+
 ### `set_registry_address(env: Env, caller: Address, registry_address: Address)`
 Stores the `GistRegistry` contract address for later reference.
 - **Inputs:** `caller: Address` (must be admin), `registry_address: Address`
@@ -56,7 +68,7 @@ Reads the stored registry address, if one has been set.
 Appends a new geohash prefix to the allow-list.
 - **Inputs:** `caller: Address` (must be admin), `prefix: String` (1–6 chars)
 - **Output:** none
-- **Errors:** panics with `"caller is not the admin"`, `"prefix cannot be empty"`, or `"prefix length cannot exceed 6"`.
+- **Errors:** panics with `"caller is not the admin"`, `"prefix cannot be empty"`, `"prefix length cannot exceed 6"`, or `"prefix list is full (max 50)"` if 50 prefixes are already stored.
 
 ### `verify_geohash(env: Env, geohash: String) -> bool`
 Checks whether the given geohash starts with any currently allowed prefix.

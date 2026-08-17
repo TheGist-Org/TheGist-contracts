@@ -9,6 +9,8 @@ use soroban_sdk::{
     String, Vec,
 };
 
+const MAX_PREFIXES: u32 = 50;
+
 #[contracttype]
 enum DataKey {
     Admin,
@@ -124,6 +126,20 @@ impl LocationVerifier {
         env.storage().instance().get(&DataKey::Admin)
     }
 
+    /// Transfer admin role; requires current admin's auth.
+    pub fn set_admin(env: Env, current_admin: Address, new_admin: Address) {
+        current_admin.require_auth();
+        let stored: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("admin not initialized");
+        if stored != current_admin {
+            panic!("caller is not the current admin");
+        }
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+    }
+
     /// Admin: store the GistRegistry contract address.
     pub fn set_registry_address(env: Env, caller: Address, registry_address: Address) {
         Self::ensure_admin(&env, &caller);
@@ -163,6 +179,9 @@ impl LocationVerifier {
             panic!("prefix length cannot exceed 6");
         }
         let mut prefixes = Self::read_allowed_prefixes(&env);
+        if prefixes.len() >= MAX_PREFIXES {
+            panic!("prefix list is full (max 50)");
+        }
         prefixes.push_back(prefix.clone());
         Self::write_allowed_prefixes(&env, &prefixes);
 
