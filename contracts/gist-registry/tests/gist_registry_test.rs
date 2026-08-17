@@ -393,8 +393,51 @@ fn test_get_gists_by_geohash() {
     client.post_gist(&ipfs_cid, &geohash, &author, &None);
     client.post_gist(&ipfs_cid, &geohash, &author, &None);
 
-    let gists = client.get_gists_by_geohash(&String::from_str(&env, "u4pruy"));
+    let gists = client.get_gists_by_geohash(&String::from_str(&env, "u4pruy"), &50u32, &0u32);
     assert_eq!(gists.len(), 2);
+}
+
+#[test]
+fn test_get_gists_by_geohash_pagination() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, GistRegistry);
+    let client = GistRegistryClient::new(&env, &contract_id);
+
+    let author = Address::generate(&env);
+    let other = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let other_geohash = String::from_str(&env, "dr5ru7k");
+
+    for _ in 0..5 {
+        client.post_gist(&ipfs_cid, &geohash, &author, &None);
+    }
+    client.post_gist(&ipfs_cid, &other_geohash, &other, &None);
+
+    let page1 = client.get_gists_by_geohash(&String::from_str(&env, "u4pruy"), &2u32, &0u32);
+    assert_eq!(page1.len(), 2);
+    assert_eq!(page1.get(0).unwrap(), 1u64);
+    assert_eq!(page1.get(1).unwrap(), 2u64);
+
+    let page2 = client.get_gists_by_geohash(&String::from_str(&env, "u4pruy"), &2u32, &2u32);
+    assert_eq!(page2.len(), 2);
+    assert_eq!(page2.get(0).unwrap(), 3u64);
+    assert_eq!(page2.get(1).unwrap(), 4u64);
+
+    let page3 = client.get_gists_by_geohash(&String::from_str(&env, "u4pruy"), &2u32, &4u32);
+    assert_eq!(page3.len(), 1);
+    assert_eq!(page3.get(0).unwrap(), 5u64);
+}
+
+#[test]
+#[should_panic(expected = "limit exceeds maximum of 50")]
+fn test_get_gists_by_geohash_limit_exceeded_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, GistRegistry);
+    let client = GistRegistryClient::new(&env, &contract_id);
+    client.get_gists_by_geohash(&String::from_str(&env, "u4pruy"), &51u32, &0u32);
 }
 
 // ── expire_gist ───────────────────────────────────────────────────────────────

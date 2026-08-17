@@ -102,7 +102,7 @@ Iterates over every gist ID from `1` to the current count and tallies how many a
 - **Inputs:** none beyond the environment
 - **Output:** `u64`
 - **Errors:** none
-- **Note:** this is an O(n) scan over all gists ever created — could become expensive as gist count grows. Be cautious calling this frequently in a production indexer; prefer event-based tracking where possible (see [`INTEGRATION.md`](./INTEGRATION.md)).
+- **⚠️ Performance warning:** this is an O(n) scan over all gists ever created. It is intended for admin dashboards and off-chain tooling only — **do not call from hot paths or production indexers**. Prefer event-based tracking for real-time active counts (see [`INTEGRATION.md`](./INTEGRATION.md)).
 
 ### `get_gists_by_author(env: Env, author: Address, limit: u32, offset: u32) -> Vec<u64>`
 Returns a paginated list of gist IDs posted by a given author, skipping any that have already been evicted from storage.
@@ -110,11 +110,11 @@ Returns a paginated list of gist IDs posted by a given author, skipping any that
 - **Output:** `Vec<u64>` of gist IDs
 - **Errors:** panics with `"limit exceeds maximum of 50"` if `limit > 50`
 
-### `get_gists_by_geohash(env: Env, geohash_prefix: String) -> Vec<u64>`
-Returns all gist IDs whose geohash starts with the given prefix. Uses a fixed 12-byte buffer internally for comparison.
-- **Inputs:** `geohash_prefix: String`
+### `get_gists_by_geohash(env: Env, geohash_prefix: String, limit: u32, offset: u32) -> Vec<u64>`
+Returns a paginated list of gist IDs whose geohash starts with the given prefix. Uses a fixed 12-byte buffer internally for comparison.
+- **Inputs:** `geohash_prefix: String`, `limit: u32` (max 50), `offset: u32`
 - **Output:** `Vec<u64>` of matching gist IDs
-- **Errors:** none directly, but be aware this is also an O(n) scan over every gist ever created
+- **Errors:** panics with `"limit exceeds maximum of 50"` if `limit > 50`
 
 ### `is_gist_active(env: Env, gist_id: u64) -> bool`
 - **Inputs:** `gist_id: u64`
@@ -169,7 +169,7 @@ Extends a gist's expiry by another 24 hours, capped so the total lifetime never 
 | `"geohash must be exactly 7 characters"` | `post_gist` | Geohash isn't exactly 7 chars |
 | `"expiry must be in the future"` | `post_gist` | Resolved expiry is in the past or now |
 | `"expiry cannot exceed 168 hours from now"` | `post_gist` | Resolved expiry is more than 7 days out |
-| `"limit exceeds maximum of 50"` | `get_gists_by_author` | `limit > 50` |
+| `"limit exceeds maximum of 50"` | `get_gists_by_author`, `get_gists_by_geohash` | `limit > 50` |
 
 ## Event reference
 

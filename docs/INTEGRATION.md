@@ -4,7 +4,7 @@ This guide explains how external systems — the indexer and the web client — 
 
 ## How the indexer should poll for events
 
-`GistRegistry` publishes two on-chain events: `GistPostedEvent` and `GistExpiredEvent` (see [`GIST_REGISTRY.md`](./GIST_REGISTRY.md#event-reference) for full payload details). The indexer's job is to watch for these events rather than re-scanning all gists on a timer, since functions like `get_active_gist_count` and `get_gists_by_geohash` scan every gist ever created and get more expensive as the dataset grows.
+`GistRegistry` publishes two on-chain events: `GistPostedEvent` and `GistExpiredEvent` (see [`GIST_REGISTRY.md`](./GIST_REGISTRY.md#event-reference) for full payload details). The indexer's job is to watch for these events rather than re-scanning all gists on a timer, since `get_active_gist_count` and `get_gists_by_geohash` scan every gist ever created and get more expensive as the dataset grows. (`get_gists_by_geohash` supports `limit`/`offset` pagination capped at 50 results per call; `get_active_gist_count` is intended for admin dashboards and off-chain tooling only — do not call from a hot path.)
 
 Recommended polling pattern:
 
