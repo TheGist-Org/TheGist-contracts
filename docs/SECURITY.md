@@ -28,6 +28,17 @@ Any exploitable bug may result in permanent loss of user funds or data integrity
 | GistRegistry | `batch_expire` | `admin` | Verified against stored admin address |
 | GistRegistry | `extend_gist_ttl` | `gist.author` | Loaded from storage, not caller-supplied |
 | GistRegistry | `set_admin` | `current_admin` | Transfers admin role atomically |
+| GistVault | `deposit` | `depositor` | User authorizing vault deposit |
+| GistVault | `withdraw` | `user` | User authorizing partial vault withdrawal |
+| GistVault | `withdraw_all` | `user` | User authorizing full vault withdrawal |
+| GistVault | `tip_author` | `tipper` | Tipper authorizing tip payment |
+| LocationVerifier | `set_admin` | `current_admin` | Transfers admin role atomically |
+| LocationVerifier | `add_allowed_prefix` | `admin` | Verified against stored admin address |
+| LocationVerifier | `remove_allowed_prefix` | `admin` | Verified against stored admin address |
+| LocationVerifier | `update_boundaries` | `admin` | Verified against stored admin address |
+| LocationVerifier | `set_registry_address` | `admin` | Verified against stored admin address |
+| LocationVerifier | `set_required_precision` | `admin` | Verified against stored admin address |
+| LocationVerifier | `register_verifier` | `admin` | Verified against stored admin address |
 
 ### Admin Privilege Separation
 
@@ -113,10 +124,9 @@ this contract's own token balance until claimed.
 ### Validation
 
 - `verify_geohash` performs a pure prefix comparison with no side effects.
-- Prefix matching uses fixed-size stack buffers (`[0u8; 64]`); geohashes or prefixes longer
-  than 64 bytes would cause a panic — acceptable given geohash max length is 12.
-- `add_allowed_prefix` caps the total number of stored prefixes at 50 to prevent unbounded
-  growth and linear-scan degradation in `is_valid_geohash`.
+- Prefix matching uses fixed-size stack buffers (`[0u8; 64]`); input lengths above 64 bytes are rejected safely without buffer overflow or panic.
+- Property-based testing via `proptest` covers geohash parsing, prefix matching, and TTL/expiry calculations to guarantee crash-freedom across arbitrary inputs.
+- `add_allowed_prefix` caps the total number of stored prefixes at 50 to prevent unbounded growth and linear-scan degradation in `is_valid_geohash`.
 
 ---
 
