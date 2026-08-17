@@ -82,11 +82,11 @@ Use the scripted flow in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 | Contract | Address |
 |----------|---------|
-| GistRegistry | `TBD` |
-| GistVault | `TBD` |
-| LocationVerifier | `TBD` |
+| GistRegistry | `CDGSGBXI2FBWA5WDJVZQJVWFUNIHGCAOIATQ4SIWVMLYLM3TZLYFJ7JS` |
+| GistVault | `CAZ2OD36TIDZ4R4L77SRVSD3X7AABSDH5ID7QSR2B5XZJLD2IIPQOC5O` |
+| LocationVerifier | `CD3LIFQ5GZ7X75Y4NMBFOSWNX7ZOBZ4IUXRXRST3W6EIDLFLGSHK7KDF` |
 
-> These will be populated after the initial testnet deployment.
+> These contract instances are deployed and verified on Soroban Testnet.
 
 ---
 
