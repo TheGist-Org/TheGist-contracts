@@ -347,3 +347,42 @@ fn test_remove_prefix_allows_adding_again_within_cap() {
     client.add_allowed_prefix(&admin, &String::from_str(&env, "newone"));
     assert_eq!(client.get_allowed_prefixes().len(), 50);
 }
+
+// ──────────────────────────────────────────────
+// Property-based fuzz tests
+// ──────────────────────────────────────────────
+
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(50))]
+
+    #[test]
+    fn prop_is_valid_geohash_never_panics(s in ".*") {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, LocationVerifier);
+        let client = LocationVerifierClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+        client.add_allowed_prefix(&admin, &String::from_str(&env, "u4pruy"));
+
+        let input = String::from_str(&env, &s);
+        let _res = client.is_valid_geohash(&input);
+    }
+
+    #[test]
+    fn prop_verify_geohash_never_panics(s in ".*") {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, LocationVerifier);
+        let client = LocationVerifierClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+        client.add_allowed_prefix(&admin, &String::from_str(&env, "u4pruy"));
+
+        let input = String::from_str(&env, &s);
+        let _res = client.verify_geohash(&input);
+    }
+}
+

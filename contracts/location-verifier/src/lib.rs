@@ -77,7 +77,7 @@ impl LocationVerifier {
     fn matches_prefix(geohash: &String, prefix: &String) -> bool {
         let gh_len = geohash.len() as usize;
         let p_len = prefix.len() as usize;
-        if p_len > gh_len {
+        if p_len > gh_len || gh_len > 64 || p_len > 64 {
             return false;
         }
         let mut gh_buf = [0u8; 64];
@@ -88,13 +88,12 @@ impl LocationVerifier {
     }
 
     fn is_valid_geohash_format(location_cell: &String) -> bool {
-        if location_cell.len() != 7 {
+        let len = location_cell.len() as usize;
+        if len > 64 || len != 7 {
             return false;
         }
 
         let valid_chars = b"0123456789bcdefghjkmnpqrstuvwxyz";
-
-        let len = location_cell.len() as usize;
         let mut buffer = [0u8; 64];
 
         location_cell.copy_into_slice(&mut buffer[..len]);
