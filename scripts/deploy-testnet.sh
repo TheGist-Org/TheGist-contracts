@@ -26,8 +26,9 @@ stellar network add "$NETWORK_NAME" \
 
 cargo build --workspace --target wasm32v1-none --release
 
-stellar keys generate --global "$DEPLOYER" >/dev/null 2>&1 || true
-stellar keys fund "$DEPLOYER" --network "$NETWORK_NAME"
+stellar keys generate "$DEPLOYER" >/dev/null 2>&1 || true
+stellar keys fund "$DEPLOYER" --network "$NETWORK_NAME" >/dev/null 2>&1 || true
+sleep 3
 
 DEPLOYER_ADDRESS="$(stellar keys address "$DEPLOYER")"
 
@@ -39,11 +40,11 @@ deploy_contract() {
     --network "$NETWORK_NAME"
 }
 
-GIST_REGISTRY_CONTRACT_ID="$(deploy_contract "$GIST_REGISTRY_WASM" | tail -n 1 | tr -d '\r')"
-GIST_VAULT_CONTRACT_ID="$(deploy_contract "$GIST_VAULT_WASM" | tail -n 1 | tr -d '\r')"
-LOCATION_VERIFIER_CONTRACT_ID="$(deploy_contract "$LOCATION_VERIFIER_WASM" | tail -n 1 | tr -d '\r')"
+GIST_REGISTRY_CONTRACT_ID="$(deploy_contract "$GIST_REGISTRY_WASM" | grep -oE 'C[A-Z0-9]{55}' | tail -n 1)"
+GIST_VAULT_CONTRACT_ID="$(deploy_contract "$GIST_VAULT_WASM" | grep -oE 'C[A-Z0-9]{55}' | tail -n 1)"
+LOCATION_VERIFIER_CONTRACT_ID="$(deploy_contract "$LOCATION_VERIFIER_WASM" | grep -oE 'C[A-Z0-9]{55}' | tail -n 1)"
 
-NATIVE_TOKEN_ID="$(stellar contract asset id --asset native --network "$NETWORK_NAME")"
+NATIVE_TOKEN_ID="$(stellar contract asset id --asset native --network "$NETWORK_NAME" | grep -oE 'C[A-Z0-9]{55}' | tail -n 1)"
 
 stellar contract invoke \
   --id "$GIST_REGISTRY_CONTRACT_ID" \
