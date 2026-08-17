@@ -574,6 +574,7 @@ dependencies = [
 name = "gist-vault"
 version = "0.1.0"
 dependencies = [
+ "gist-registry",
  "soroban-sdk",
 ]
 
