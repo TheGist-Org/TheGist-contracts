@@ -1,0 +1,98 @@
+name: Testnet Smoke Test
+
+on:
+  schedule:
+    # Run daily at 06:00 UTC — low-traffic window for testnet.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for manual run"
+        required: false
+        type: string
+
+# Prevent overlapping runs — only the latest schedule matters.
+concurrency:
+  group: testnet-smoke
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify deployed contracts
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install stellar-cli
+        run: cargo install --locked stellar-cli
+
+      - name: Write .env.contracts from secrets
+        run: |
+          cat > .env.contracts <<'EOF'
+          ${{ secrets.ENV_CONTRACTS }}
+          EOF
+
+      - name: Import deployer key
+        run: |
+          stellar keys add deployer --secret "${{ secrets.DEPLOYER_SECRET_KEY }}" --overwrite
+
+      - name: Run verification
+        run: |
+          chmod +x scripts/verify-deployment.sh
+          DEPLOYER=deployer scripts/verify-deployment.sh
+
+      - name: Notify on failure
+        if: failure() && github.event_name == 'schedule'
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": ":warning: Testnet smoke test failed for ${{ github.repository }}.\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+        continue-on-error: true
+
+# ──────────────────────────────────────────────────────────────────────
+# Setup & key rotation
+# ──────────────────────────────────────────────────────────────────────
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#
+#   ENV_CONTRACTS        — the full contents of .env.contracts (see below)
+#   DEPLOYER_SECRET_KEY  — the Stellar secret key for the deployer account
+#   SLACK_WEBHOOK_URL    — (optional) Slack incoming webhook for failure alerts
+#
+# .env.contracts template:
+#   NETWORK_NAME="testnet"
+#   RPC_URL="https://soroban-testnet.stellar.org"
+#   NETWORK_PASSPHRrase="Test SDF Network ; September 2015"
+#   DEPLOYER="deployer"
+#   DEPLOYER_ADDRESS="<your-deployer-address>"
+#   DEFAULT_ALLOWED_PREFIX="u4pruy"
+#   GIST_REGISTRY_CONTRACT_ID="<deployed-contract-id>"
+#   GIST_VAULT_CONTRACT_ID="<deployed-contract-id>"
+#   LOCATION_VERIFIER_CONTRACT_ID="<deployed-contract-id>"
+#
+# Rotating the deployer key:
+#   1. Generate a new key pair:
+#        stellar keys generate --global new-deployer
+#        stellar keys address new-deployer   # record the address
+#
+#   2. Fund it on testnet:
+#        stellar keys fund new-deployer --network testnet
+#
+#   3. Transfer admin on each contract (GistRegistry, LocationVerifier):
+#        stellar contract invoke --id <contract-id> \
+#          --source deployer --network testnet \
+#          -- set_admin --current_admin <old-address> --new_admin <new-address>
+#
+#   4. Update repo secrets:
+#        - DEPLOYER_SECRET_KEY → paste the new secret key
+#        - ENV_CONTRACTS → update DEPLOYER_ADDRESS to the new address
+#
+#   5. Verify the new key works by triggering a manual run of this workflow.
