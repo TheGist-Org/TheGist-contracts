@@ -415,21 +415,37 @@ impl GistRegistry {
         active
     }
 
-    pub fn get_gists_by_geohash(env: Env, geohash_prefix: String) -> Vec<u64> {
+    pub fn get_gists_by_geohash(
+        env: Env,
+        geohash_prefix: String,
+        limit: u32,
+        offset: u32,
+    ) -> Vec<u64> {
+        if limit > 50 {
+            panic!("limit exceeds maximum of 50");
+        }
         let count = Self::read_gist_count(&env);
         let mut result = Vec::new(&env);
+        let mut skipped: u32 = 0;
         let prefix_len = geohash_prefix.len() as usize;
         let mut prefix_buf = [0u8; 12];
         geohash_prefix.copy_into_slice(&mut prefix_buf[..prefix_len]);
 
         for id in 1..=count {
+            if result.len() >= limit {
+                break;
+            }
             if let Some(gist) = Self::load_gist(&env, id) {
                 let gist_len = gist.geohash.len() as usize;
                 if gist_len >= prefix_len {
                     let mut gist_buf = [0u8; 12];
                     gist.geohash.copy_into_slice(&mut gist_buf[..gist_len]);
                     if gist_buf[..prefix_len] == prefix_buf[..prefix_len] {
-                        result.push_back(id);
+                        if skipped < offset {
+                            skipped += 1;
+                        } else {
+                            result.push_back(id);
+                        }
                     }
                 }
             }
