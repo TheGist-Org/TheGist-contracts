@@ -210,4 +210,4 @@ Extends a gist's expiry by another 24 hours, capped so the total lifetime never 
 ```
 - **Emitted by:** `expire_gist`, `admin_expire_gist`, and `batch_expire` (once per gist actually expired in the batch). `expired_by` is the author in the self-expire case, or the admin in the admin/batch case.
 
-**Note on `ContractUpgradedEvent`:** `lib.rs` re-exports a type called `ContractUpgradedEvent` from this module, but no such struct or emitting function exists in `gist_registry.rs` as currently written. This appears to be aspirational/future-facing — there is no upgrade mechanism implemented yet. Do not document this as a working event until it actually exists in the source.
+**Note on Contract Upgrades:** Contracts in v1 are strictly immutable; there is no upgrade function, and `ContractUpgradedEvent` has been removed to prevent dead-code confusion.

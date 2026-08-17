@@ -94,23 +94,16 @@ GistRegistry association corrupted.
 
 ## Threat 5 — Contract Upgrade Attack
 
-**Vector:** If an upgrade mechanism is added in the future, an attacker who controls the
-admin key could deploy a malicious WASM that redefines contract behaviour (e.g., allows
-arbitrary withdrawals from GistVault).
+**Vector:** An attacker attempts to execute an unauthorized WASM code upgrade on deployed contracts to alter storage layout or administrative logic.
 
 **Impact:** Complete contract compromise post-upgrade.
 
 **Mitigations:**
-- There is currently **no upgrade function** in any contract; this vector does not exist
-  today.
-- If an upgrade function is added, it must be gated behind the admin key and ideally a
-  time-lock or multi-sig to give users time to verify the new WASM hash.
-- All upgrade transactions should be announced off-chain in the project's governance channel
-  before execution.
-- The new WASM hash should be published and independently verifiable against the source
-  build.
+- Contracts in v1 are strictly **immutable**. There is no `upgrade` function in any contract codebase.
+- The unused `ContractUpgradedEvent` has been removed from `GistRegistry` to prevent dead-code confusion.
+- Upgrading to a new protocol version requires deploying a new contract instance and announcing the new address off-chain.
 
-**Residual Risk:** Not applicable until an upgrade mechanism is introduced.
+**Residual Risk:** Risk is eliminated for v1 since contract code cannot be mutated on-chain.
 
 ---
 
