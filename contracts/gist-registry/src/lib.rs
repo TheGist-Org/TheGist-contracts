@@ -171,8 +171,8 @@ impl GistRegistry {
         env.storage().instance().get(&DataKey::Admin)
     }
 
-    pub fn get_version(_: Env) -> u32 {
-        1
+    pub fn get_version(env: Env) -> u32 {
+        Self::get_contract_version(env)
     }
 
     pub fn get_contract_version(env: Env) -> u32 {
