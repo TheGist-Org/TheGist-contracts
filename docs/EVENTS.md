@@ -51,25 +51,7 @@ Emitted when a gist is manually expired (by author or admin).
 ```
 topics = [symbol("gist"), symbol("expired")]
 data   = GistExpiredEvent { gist_id, expired_by }
-```
-
----
-
-### ContractUpgraded
-
-Emitted when the contract is upgraded to a new version.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `old_version` | `u32` | Previous contract version |
-| `new_version` | `u32` | New contract version |
-
-```
-topics = [symbol("contract"), symbol("upgraded")]
-data   = ContractUpgradedEvent { old_version, new_version }
-```
-
----
+```---
 
 ## GistVault
 
