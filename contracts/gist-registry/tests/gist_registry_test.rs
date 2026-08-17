@@ -671,3 +671,30 @@ fn test_get_active_gist_count() {
     client.admin_expire_gist(&admin, &id2);
     assert_eq!(client.get_active_gist_count(), 1);
 }
+
+// ──────────────────────────────────────────────
+// Property-based TTL & expiry boundary tests
+// ──────────────────────────────────────────────
+
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(50))]
+
+    #[test]
+    fn prop_post_gist_valid_ttl_hours_succeeds(ttl in 1u64..=168u64) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, GistRegistry);
+        let client = GistRegistryClient::new(&env, &contract_id);
+
+        let author = Address::generate(&env);
+        let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+        let geohash = String::from_str(&env, "u4pruyd");
+
+        let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &Some(ttl));
+        let gist = client.get_gist(&gist_id).expect("gist should exist");
+        let expected_expiry = env.ledger().timestamp() + (ttl * 3600);
+        assert_eq!(gist.expiry, expected_expiry);
+    }
+}
