@@ -698,4 +698,3 @@ proptest! {
         assert_eq!(gist.expiry, expected_expiry);
     }
 }
-

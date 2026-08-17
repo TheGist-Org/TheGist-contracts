@@ -385,4 +385,3 @@ proptest! {
         let _res = client.verify_geohash(&input);
     }
 }
-
