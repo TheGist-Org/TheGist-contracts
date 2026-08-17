@@ -4,16 +4,39 @@
 // can't be scoped around macro-generated spans, so it's allowed crate-wide here.
 #![allow(clippy::disallowed_methods)]
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env};
-
-#[cfg(test)]
-mod gist_vault_test;
+use soroban_sdk::{
+    contract, contractclient, contractimpl, contracttype, symbol_short, token, Address, Bytes, Env,
+    String,
+};
 
 #[contracttype]
 enum DataKey {
+    Admin,
     TokenAddress,
+    RegistryAddress,
     PendingBalance(Address),
     GistTotalTips(u64),
+}
+
+/// Minimal interface for cross-contract calls into a deployed GistRegistry instance.
+/// Declared locally (rather than depending on the gist-registry crate) so this contract's
+/// own wasm build doesn't pull in GistRegistry's contract implementation and collide with it.
+#[contractclient(name = "GistRegistryClient")]
+pub trait GistRegistryInterface {
+    fn get_gist(env: Env, gist_id: u64) -> Option<Gist>;
+}
+
+/// Mirrors `GistRegistry`'s `Gist` struct for cross-contract deserialization.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct Gist {
+    pub gist_id: u64,
+    pub ipfs_cid: Bytes,
+    pub geohash: String,
+    pub author: Address,
+    pub timestamp: u64,
+    pub expiry: u64,
+    pub is_active: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,24 +103,68 @@ impl GistVault {
             .get(&DataKey::TokenAddress)
             .expect("vault not initialized")
     }
+
+    fn read_registry(env: &Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::RegistryAddress)
+            .expect("registry address not set")
+    }
+
+    fn ensure_admin(env: &Env, caller: &Address) {
+        caller.require_auth();
+        let stored: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("admin not initialized");
+        if stored != *caller {
+            panic!("caller is not the admin");
+        }
+    }
 }
 
 #[contractimpl]
 impl GistVault {
-    /// Initialize the vault with the token contract used for tips (e.g. the native XLM SAC).
-    pub fn initialize(env: Env, token: Address) {
+    /// Initialize the vault with the token contract, admin address, and GistRegistry address.
+    /// Must be called once before any other function.
+    pub fn initialize(env: Env, token: Address, admin: Address, registry: Address) {
         if env.storage().instance().has(&DataKey::TokenAddress) {
             panic!("already initialized");
         }
         env.storage().instance().set(&DataKey::TokenAddress, &token);
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::RegistryAddress, &registry);
     }
 
-    /// Send a tip to a gist's author. Transfers `amount` of the vault's token from `tipper`
-    /// into escrow, credited against `recipient`'s pending balance and `gist_id`'s running
-    /// tip total.
+    /// Update the GistRegistry address. Only callable by the admin.
+    pub fn set_registry_address(env: Env, admin: Address, new_registry: Address) {
+        Self::ensure_admin(&env, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::RegistryAddress, &new_registry);
+    }
+
+    /// Send a tip to a gist's author. Verifies the gist exists in GistRegistry and that
+    /// `recipient` matches the gist's author. Transfers `amount` of the vault's token from
+    /// `tipper` into escrow, credited against `recipient`'s pending balance and `gist_id`'s
+    /// running tip total.
     pub fn tip_author(env: Env, tipper: Address, recipient: Address, gist_id: u64, amount: i128) {
         tipper.require_auth();
         assert!(amount > 0, "tip amount must be positive");
+
+        // Verify gist exists and recipient matches the author.
+        let registry_client = GistRegistryClient::new(&env, &Self::read_registry(&env));
+        let gist = registry_client
+            .get_gist(&gist_id)
+            .expect("gist not found in GistRegistry");
+        assert!(gist.is_active, "gist is not active");
+        assert!(
+            gist.author == recipient,
+            "recipient does not match gist author"
+        );
 
         let token_client = token::Client::new(&env, &Self::read_token(&env));
         token_client.transfer(&tipper, &env.current_contract_address(), &amount);

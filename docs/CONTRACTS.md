@@ -29,12 +29,12 @@ See [`LOCATION_VERIFIER.md`](./LOCATION_VERIFIER.md) for the full function refer
 
 An optional tipping vault intended to let users send anonymous XLM tips to gist authors, which authors can later withdraw.
 
-**Current status:** `GistVault` is fully implemented. `tip_author` transfers tokens from a tipper into escrow and credits the recipient's pending balance and the gist's running tip total; `claim_tips` lets the author withdraw. See [`GIST_VAULT.md`](./GIST_VAULT.md) for the full function reference.
+**Current status:** `GistVault` is fully implemented. `tip_author` verifies the gist exists in `GistRegistry` and that the recipient matches the gist's author before transferring tokens into escrow; `claim_tips` lets the author withdraw. See [`GIST_VAULT.md`](./GIST_VAULT.md) for the full function reference.
 
 ## How they interact
 
 - `LocationVerifier` holds a reference to `GistRegistry`'s address via `set_registry_address`. `LocationVerifier.verify_and_post` uses it to cross-contract call `GistRegistry.post_gist` directly, so a client can validate-and-post in a single transaction instead of two separate calls.
-- `GistVault` takes a `gist_id` as a parameter in `tip_author`/`get_total_tips_for_gist` to track per-gist tip totals, but does not itself call into `GistRegistry` — it trusts the caller to supply a real `gist_id`.
+- `GistVault` holds a reference to `GistRegistry`'s address via `initialize` (or `set_registry_address`). `tip_author` cross-contract calls `GistRegistry.get_gist(gist_id)` to verify the gist exists, is active, and that the recipient matches the author before accepting a tip.
 - Each contract is deployed as its own wasm artifact (see the repo's [Project Layout](../README.md#project-layout)); none of the three share a build.
 
 In short: `GistRegistry` is the source of truth for gist data and is fully self-contained. `LocationVerifier` is a fully working validation step that can optionally post on the caller's behalf. `GistVault` is a fully working, independent tipping add-on.
@@ -47,6 +47,6 @@ Deploy and initialize in this order:
 2. **Deploy `LocationVerifier`**, then call `__init()`. This sets up an empty allowed-prefix list if one doesn't already exist (safe to call multiple times).
 3. **Wire them together**: call `LocationVerifier.set_registry_address(registry_address)` with the address from step 1, so `LocationVerifier` knows which registry it's paired with.
 4. **Configure allowed regions**: call `LocationVerifier.add_allowed_prefix(prefix)` for each geohash prefix you want to allow.
-5. **Deploy `GistVault`**, then call `__init()`. Since this contract is currently a stub, this step has no real effect beyond reserving the deployment — revisit once the vault logic is implemented.
+5. **Deploy `GistVault`**, then call `initialize(token, admin, registry)` with the token address (e.g. native XLM SAC), the admin address, and the `GistRegistry` contract ID from step 1. This can only be called once — a second call will panic with `"already initialized"`.
 
 For exact CLI commands and environment setup, see [`DEPLOYMENT.md`](./DEPLOYMENT.md) (existing deployment doc) and [`INTEGRATION.md`](./INTEGRATION.md) for localnet testing steps.
