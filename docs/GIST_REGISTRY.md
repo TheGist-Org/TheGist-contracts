@@ -63,9 +63,13 @@ Sets the admin address. Intended to be called exactly once, immediately after de
 
 ### `get_version(env: Env) -> u32`
 - **Inputs:** none beyond the environment
-- **Output:** always returns the hardcoded value `1`
+- **Output:** returns the stored contract version (set during `initialize`); delegates to `get_contract_version`
 - **Errors:** none
-- **⚠️ Known issue:** Due to a missing closing brace in the source, `get_version`'s body and `get_contract_version`'s body are merged in the compiled contract — `get_contract_version` is effectively unreachable dead code nested inside `get_version`. As written, calling what is intended to be `get_contract_version` will not work as a separate exported function. Treat `get_version` as the only working version-check function for now, and note this as a bug to flag for a future fix rather than relying on `get_contract_version` in integrations.
+
+### `get_contract_version(env: Env) -> u32`
+- **Inputs:** none beyond the environment
+- **Output:** reads `DataKey::ContractVersion` from instance storage, falling back to the compile-time `CONTRACT_VERSION` constant if uninitialized
+- **Errors:** none
 
 ### `set_admin(env: Env, current_admin: Address, new_admin: Address)`
 Transfers admin rights to a new address.

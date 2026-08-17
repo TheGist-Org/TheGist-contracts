@@ -26,13 +26,13 @@ fn test_initialize_and_get_admin() {
 }
 
 #[test]
-fn test_initialize_sets_version_to_1() {
+fn test_initialize_sets_version_to_contract_version() {
     let env = Env::default();
     let contract_id = env.register_contract(None, GistRegistry);
     let client = GistRegistryClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     client.initialize(&admin);
-    assert_eq!(client.get_version(), 1);
+    assert_eq!(client.get_version(), client.get_contract_version());
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn test_post_gist_uses_temporary_storage_and_instance_metadata() {
     client.initialize(&admin);
     let gist_id = client.post_gist(&ipfs_cid, &geohash, &author, &Some(24));
 
-    assert_eq!(client.get_version(), 1);
+    assert_eq!(client.get_version(), client.get_contract_version());
     env.as_contract(&contract_id, || {
         // Admin + ContractVersion + GistCount = 3 instance keys
         assert_eq!(env.storage().instance().all().len(), 3);
