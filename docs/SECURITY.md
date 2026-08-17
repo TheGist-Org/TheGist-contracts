@@ -14,7 +14,7 @@ Any exploitable bug may result in permanent loss of user funds or data integrity
 
 | Role | Who | Scope |
 |------|-----|-------|
-| Admin | Single address set at `initialize` | Can expire any gist, transfer admin role |
+| Admin | Single address set at `initialize` | Can expire any gist, transfer admin role, manage location prefixes |
 | Author | Any authenticated Stellar address | Can post, expire, and extend their own gists |
 | Public | Anyone | Read-only queries |
 
@@ -104,16 +104,19 @@ this contract's own token balance until claimed.
 
 | Function | Access | Notes |
 |----------|--------|-------|
-| `add_allowed_prefix` | Admin | Verified against stored admin address |
+| `add_allowed_prefix` | Admin | Verified against stored admin address; capped at 50 prefixes |
 | `remove_allowed_prefix` | Admin | Verified against stored admin address |
 | `update_boundaries` | Admin | Verified against stored admin address |
 | `set_registry_address` | Admin | Verified against stored admin address |
+| `set_admin` | Current admin | Transfers admin role atomically |
 
 ### Validation
 
 - `verify_geohash` performs a pure prefix comparison with no side effects.
 - Prefix matching uses fixed-size stack buffers (`[0u8; 64]`); geohashes or prefixes longer
   than 64 bytes would cause a panic — acceptable given geohash max length is 12.
+- `add_allowed_prefix` caps the total number of stored prefixes at 50 to prevent unbounded
+  growth and linear-scan degradation in `is_valid_geohash`.
 
 ---
 
