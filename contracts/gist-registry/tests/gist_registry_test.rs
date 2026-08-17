@@ -377,6 +377,41 @@ fn test_get_gists_by_author_limit_exceeded_panics() {
     client.get_gists_by_author(&author, &51u32, &0u32);
 }
 
+// ── author_gists list cap ─────────────────────────────────────────────────
+
+#[test]
+fn test_author_gists_list_stays_bounded() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, GistRegistry);
+    let client = GistRegistryClient::new(&env, &contract_id);
+
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+
+    // Post 10 gists — well under the cap, but proves the list grows correctly
+    for _ in 0..10 {
+        client.post_gist(&ipfs_cid, &geohash, &author, &None);
+    }
+
+    let all = client.get_gists_by_author(&author, &50u32, &0u32);
+    assert_eq!(all.len(), 10);
+    assert_eq!(all.get(0).unwrap(), 1u64);
+    assert_eq!(all.get(9).unwrap(), 10u64);
+
+    // Verify limit still works at boundary
+    let partial = client.get_gists_by_author(&author, &5u32, &0u32);
+    assert_eq!(partial.len(), 5);
+    assert_eq!(partial.get(0).unwrap(), 1u64);
+    assert_eq!(partial.get(4).unwrap(), 5u64);
+
+    let offset_page = client.get_gists_by_author(&author, &5u32, &5u32);
+    assert_eq!(offset_page.len(), 5);
+    assert_eq!(offset_page.get(0).unwrap(), 6u64);
+    assert_eq!(offset_page.get(4).unwrap(), 10u64);
+}
+
 // ── get_gists_by_geohash ─────────────────────────────────────────────────────
 
 #[test]

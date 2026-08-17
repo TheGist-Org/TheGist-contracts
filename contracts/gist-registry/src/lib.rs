@@ -14,6 +14,7 @@ const SECONDS_PER_HOUR: u64 = 3600;
 const DEFAULT_GIST_TTL_HOURS: u32 = 24;
 const MAX_GIST_TTL_HOURS: u32 = 24 * 7;
 const AUTHOR_LIST_TTL_HOURS: u32 = 24 * 30;
+const MAX_AUTHOR_GISTS: u32 = 500;
 
 #[contracttype]
 enum DataKey {
@@ -124,6 +125,13 @@ impl GistRegistry {
             .get::<DataKey, Vec<u64>>(&key)
             .unwrap_or_else(|| Vec::new(env));
         gist_ids.push_back(gist_id);
+
+        // Cap at MAX_AUTHOR_GISTS by dropping oldest entries from the front.
+        // Dead entries are already skipped at read time by get_gists_by_author.
+        while gist_ids.len() > MAX_AUTHOR_GISTS {
+            gist_ids.pop_front();
+        }
+
         env.storage().temporary().set(&key, &gist_ids);
         let ttl = Self::hours_to_ledger_ttl(AUTHOR_LIST_TTL_HOURS);
         env.storage().temporary().extend_ttl(&key, ttl, ttl);

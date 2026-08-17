@@ -12,9 +12,17 @@ Storage keys are defined by the internal `DataKey` enum:
 | `DataKey::GistCount` | instance | `u64` | The total number of gists ever posted (used to generate new IDs) |
 | `DataKey::ContractVersion` | instance | `u32` | Set on `initialize`, intended to track contract version |
 | `DataKey::Gist(u64)` | temporary | `Gist` | One entry per gist, keyed by its `gist_id` |
-| `DataKey::AuthorGists(Address)` | temporary | `Vec<u64>` | List of gist IDs posted by a given author |
+| `DataKey::AuthorGists(Address)` | temporary | `Vec<u64>` | List of gist IDs posted by a given author (capped at 500 entries — oldest dropped when exceeded) |
 
 **Important distinction:** `Admin`, `GistCount`, and `ContractVersion` are stored in **instance** storage, which does not expire. `Gist` records and `AuthorGists` lists are stored in **temporary** storage, which has a TTL (time-to-live) measured in ledgers and must be periodically extended or the data will be evicted by the network — see the TTL section below.
+
+### `AuthorGists` list cap
+
+Each author's gist ID list (`AuthorGists`) is capped at **500 entries**. When the cap is exceeded, the oldest entries are dropped from the front of the list. This prevents unbounded storage growth for prolific authors. The tradeoff:
+
+- **Pro:** Storage cost per author stays bounded regardless of how many gists they post.
+- **Con:** If an author posts more than 500 gists, their oldest gist IDs are no longer queryable via `get_gists_by_author` — though the gists themselves still exist in storage and are individually accessible via `get_gist(gist_id)`.
+- **Note:** The list may contain "dead" references to gists that have been evicted from temporary storage. `get_gists_by_author` already skips these at read time via `load_gist().is_some()` filtering.
 
 ### The `Gist` struct
 
