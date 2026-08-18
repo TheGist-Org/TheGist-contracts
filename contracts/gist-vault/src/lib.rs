@@ -5,9 +5,12 @@
 #![allow(clippy::disallowed_methods)]
 
 use soroban_sdk::{
-    contract, contractclient, contractimpl, contracttype, symbol_short, token, Address, Bytes, Env,
-    String,
+    contract, contractclient, contractimpl, contracttype, symbol_short, token, Address, Bytes,
+    BytesN, Env, String,
 };
+
+const LEDGERS_PER_HOUR: u32 = 720;
+const TIP_RECORD_TTL_HOURS: u32 = 48;
 
 #[contracttype]
 enum DataKey {
@@ -16,6 +19,18 @@ enum DataKey {
     RegistryAddress,
     PendingBalance(Address),
     GistTotalTips(u64),
+    TipRecord(BytesN<32>),
+}
+
+/// Records what a given idempotency key already did, so a retried `tip_author` call with
+/// the same key can be recognized as the same logical attempt rather than a new tip.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct TipRecord {
+    pub tipper: Address,
+    pub recipient: Address,
+    pub gist_id: u64,
+    pub amount: i128,
 }
 
 /// Minimal interface for cross-contract calls into a deployed GistRegistry instance.
@@ -111,6 +126,25 @@ impl GistVault {
             .expect("registry address not set")
     }
 
+    fn tip_record_key(idempotency_key: &BytesN<32>) -> DataKey {
+        DataKey::TipRecord(idempotency_key.clone())
+    }
+
+    fn read_tip_record(env: &Env, idempotency_key: &BytesN<32>) -> Option<TipRecord> {
+        env.storage()
+            .temporary()
+            .get(&Self::tip_record_key(idempotency_key))
+    }
+
+    fn write_tip_record(env: &Env, idempotency_key: &BytesN<32>, record: &TipRecord) {
+        let key = Self::tip_record_key(idempotency_key);
+        env.storage().temporary().set(&key, record);
+        let ttl = TIP_RECORD_TTL_HOURS
+            .checked_mul(LEDGERS_PER_HOUR)
+            .expect("ttl too large");
+        env.storage().temporary().extend_ttl(&key, ttl, ttl);
+    }
+
     fn ensure_admin(env: &Env, caller: &Address) {
         caller.require_auth();
         let stored: Address = env
@@ -151,9 +185,31 @@ impl GistVault {
     /// `recipient` matches the gist's author. Transfers `amount` of the vault's token from
     /// `tipper` into escrow, credited against `recipient`'s pending balance and `gist_id`'s
     /// running tip total.
-    pub fn tip_author(env: Env, tipper: Address, recipient: Address, gist_id: u64, amount: i128) {
+    ///
+    /// `idempotency_key` makes retries of the same logical tip attempt safe: a repeated call
+    /// with the same key and identical arguments is a no-op (no second transfer). The same
+    /// key reused with different arguments panics, since that's a client bug or a collision,
+    /// not a legitimate retry. The record is kept for 48 hours — long enough to cover any
+    /// realistic retry window, after which a reused key is treated as a fresh attempt.
+    pub fn tip_author(
+        env: Env,
+        tipper: Address,
+        recipient: Address,
+        gist_id: u64,
+        amount: i128,
+        idempotency_key: BytesN<32>,
+    ) {
         tipper.require_auth();
         assert!(amount > 0, "tip amount must be positive");
+
+        if let Some(existing) = Self::read_tip_record(&env, &idempotency_key) {
+            let matches = existing.tipper == tipper
+                && existing.recipient == recipient
+                && existing.gist_id == gist_id
+                && existing.amount == amount;
+            assert!(matches, "idempotency key reused with different parameters");
+            return;
+        }
 
         // Verify gist exists and recipient matches the author.
         let registry_client = GistRegistryClient::new(&env, &Self::read_registry(&env));
@@ -178,6 +234,17 @@ impl GistVault {
             .checked_add(amount)
             .expect("gist total overflow");
         Self::write_gist_total(&env, gist_id, new_total);
+
+        Self::write_tip_record(
+            &env,
+            &idempotency_key,
+            &TipRecord {
+                tipper,
+                recipient: recipient.clone(),
+                gist_id,
+                amount,
+            },
+        );
 
         env.events().publish(
             (symbol_short!("vault"), symbol_short!("tipped")),

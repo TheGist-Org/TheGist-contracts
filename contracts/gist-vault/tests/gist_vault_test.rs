@@ -1,7 +1,12 @@
 use gist_registry::{GistRegistry, GistRegistryClient};
 use gist_vault::{GistVault, GistVaultClient};
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{token, Address, Bytes, Env, String};
+use soroban_sdk::{token, Address, Bytes, BytesN, Env, String};
+
+/// Deterministic, distinct idempotency keys for tests — one seed per logical tip attempt.
+fn idem_key(env: &Env, seed: u8) -> BytesN<32> {
+    BytesN::from_array(env, &[seed; 32])
+}
 
 fn setup() -> (
     Env,
@@ -72,7 +77,7 @@ fn test_tip_and_get_pending_balance() {
     // Post a gist so the vault can verify it
     let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
 
-    vault_client.tip_author(&tipper, &author, &gist_id, &500_000i128);
+    vault_client.tip_author(&tipper, &author, &gist_id, &500_000i128, &idem_key(&env, 1));
     assert_eq!(vault_client.get_pending_balance(&author), 500_000i128);
 }
 
@@ -85,8 +90,8 @@ fn test_multiple_tips_accumulate_pending_balance() {
 
     let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
 
-    vault_client.tip_author(&tipper, &author, &gist_id, &200_000i128);
-    vault_client.tip_author(&tipper, &author, &gist_id, &300_000i128);
+    vault_client.tip_author(&tipper, &author, &gist_id, &200_000i128, &idem_key(&env, 1));
+    vault_client.tip_author(&tipper, &author, &gist_id, &300_000i128, &idem_key(&env, 2));
     assert_eq!(vault_client.get_pending_balance(&author), 500_000i128);
 }
 
@@ -101,8 +106,20 @@ fn test_tips_to_different_authors_are_independent() {
     let gist_id1 = registry_client.post_gist(&ipfs_cid, &geohash, &author1, &None);
     let gist_id2 = registry_client.post_gist(&ipfs_cid, &geohash, &author2, &None);
 
-    vault_client.tip_author(&tipper, &author1, &gist_id1, &100_000i128);
-    vault_client.tip_author(&tipper, &author2, &gist_id2, &200_000i128);
+    vault_client.tip_author(
+        &tipper,
+        &author1,
+        &gist_id1,
+        &100_000i128,
+        &idem_key(&env, 1),
+    );
+    vault_client.tip_author(
+        &tipper,
+        &author2,
+        &gist_id2,
+        &200_000i128,
+        &idem_key(&env, 2),
+    );
 
     assert_eq!(vault_client.get_pending_balance(&author1), 100_000i128);
     assert_eq!(vault_client.get_pending_balance(&author2), 200_000i128);
@@ -117,7 +134,7 @@ fn test_get_total_tips_for_gist() {
 
     let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
 
-    vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128);
+    vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128, &idem_key(&env, 1));
     assert_eq!(vault_client.get_total_tips_for_gist(&gist_id), 100_000i128);
 }
 
@@ -130,7 +147,7 @@ fn test_tip_zero_amount_panics() {
     let geohash = String::from_str(&env, "u4pruyd");
 
     let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
-    vault_client.tip_author(&tipper, &author, &gist_id, &0i128);
+    vault_client.tip_author(&tipper, &author, &gist_id, &0i128, &idem_key(&env, 1));
 }
 
 #[test]
@@ -142,7 +159,7 @@ fn test_claim_tips_transfers_and_clears_balance() {
 
     let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
 
-    vault_client.tip_author(&tipper, &author, &gist_id, &300_000i128);
+    vault_client.tip_author(&tipper, &author, &gist_id, &300_000i128, &idem_key(&env, 1));
     let claimed = vault_client.claim_tips(&author);
     assert_eq!(claimed, 300_000i128);
     assert_eq!(vault_client.get_pending_balance(&author), 0i128);
@@ -168,9 +185,9 @@ fn test_tip_after_claim_starts_fresh() {
 
     let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
 
-    vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128);
+    vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128, &idem_key(&env, 1));
     vault_client.claim_tips(&author);
-    vault_client.tip_author(&tipper, &author, &gist_id, &50_000i128);
+    vault_client.tip_author(&tipper, &author, &gist_id, &50_000i128, &idem_key(&env, 2));
 
     assert_eq!(vault_client.get_pending_balance(&author), 50_000i128);
 }
@@ -182,7 +199,13 @@ fn test_tip_after_claim_starts_fresh() {
 fn test_tip_nonexistent_gist_panics() {
     let (env, tipper, _token_id, _vault_admin, vault_client, _registry_client) = setup();
     let recipient = Address::generate(&env);
-    vault_client.tip_author(&tipper, &recipient, &999u64, &100_000i128);
+    vault_client.tip_author(
+        &tipper,
+        &recipient,
+        &999u64,
+        &100_000i128,
+        &idem_key(&env, 1),
+    );
 }
 
 #[test]
@@ -197,7 +220,13 @@ fn test_tip_wrong_recipient_panics() {
     let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
 
     // Try to tip with a different recipient than the gist author
-    vault_client.tip_author(&tipper, &wrong_recipient, &gist_id, &100_000i128);
+    vault_client.tip_author(
+        &tipper,
+        &wrong_recipient,
+        &gist_id,
+        &100_000i128,
+        &idem_key(&env, 1),
+    );
 }
 
 #[test]
@@ -211,7 +240,7 @@ fn test_tip_inactive_gist_panics() {
     let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
     registry_client.expire_gist(&author, &gist_id);
 
-    vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128);
+    vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128, &idem_key(&env, 1));
 }
 
 // ── admin: set_registry_address ──────────────────────────────────────────────
@@ -234,7 +263,7 @@ fn test_set_registry_address() {
     let gist_id = new_registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
 
     // Tipping against the new registry works
-    vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128);
+    vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128, &idem_key(&env, 1));
     assert_eq!(vault_client.get_pending_balance(&author), 100_000i128);
 }
 
@@ -259,5 +288,79 @@ fn test_tip_before_registry_set_panics() {
 
     let tipper = Address::generate(&env);
     let recipient = Address::generate(&env);
-    client.tip_author(&tipper, &recipient, &1u64, &100_000i128);
+    client.tip_author(&tipper, &recipient, &1u64, &100_000i128, &idem_key(&env, 1));
+}
+
+// ── idempotency ───────────────────────────────────────────────────────────────
+
+#[test]
+fn test_tip_retry_same_key_same_args_is_noop() {
+    let (env, tipper, token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+    let key = idem_key(&env, 1);
+
+    vault_client.tip_author(&tipper, &author, &gist_id, &300_000i128, &key);
+    // Simulate a client retry after an ambiguous confirmation: same key, same args.
+    vault_client.tip_author(&tipper, &author, &gist_id, &300_000i128, &key);
+    vault_client.tip_author(&tipper, &author, &gist_id, &300_000i128, &key);
+
+    // Only one tip should have actually landed.
+    assert_eq!(vault_client.get_pending_balance(&author), 300_000i128);
+    assert_eq!(vault_client.get_total_tips_for_gist(&gist_id), 300_000i128);
+
+    // Prove it at the token level too, not just via the vault's own bookkeeping —
+    // the tipper should only have been charged once.
+    let token_client = token::Client::new(&env, &token_id);
+    assert_eq!(token_client.balance(&tipper), 1_000_000i128 - 300_000i128);
+}
+
+#[test]
+#[should_panic(expected = "idempotency key reused with different parameters")]
+fn test_tip_retry_same_key_different_amount_panics() {
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+    let key = idem_key(&env, 1);
+
+    vault_client.tip_author(&tipper, &author, &gist_id, &300_000i128, &key);
+    // Same key, different amount — a client bug or a collision, not a legitimate retry.
+    vault_client.tip_author(&tipper, &author, &gist_id, &999_000i128, &key);
+}
+
+#[test]
+#[should_panic(expected = "idempotency key reused with different parameters")]
+fn test_tip_retry_same_key_different_recipient_panics() {
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author1 = Address::generate(&env);
+    let author2 = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id1 = registry_client.post_gist(&ipfs_cid, &geohash, &author1, &None);
+    let gist_id2 = registry_client.post_gist(&ipfs_cid, &geohash, &author2, &None);
+    let key = idem_key(&env, 1);
+
+    vault_client.tip_author(&tipper, &author1, &gist_id1, &100_000i128, &key);
+    // Same key, different recipient/gist_id entirely.
+    vault_client.tip_author(&tipper, &author2, &gist_id2, &100_000i128, &key);
+}
+
+#[test]
+fn test_tip_different_keys_are_independent_even_with_identical_args() {
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    // Two genuinely separate tips that happen to share the same amount/recipient/gist —
+    // distinct keys mean both should go through, not be mistaken for a retry.
+    vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128, &idem_key(&env, 1));
+    vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128, &idem_key(&env, 2));
+
+    assert_eq!(vault_client.get_pending_balance(&author), 200_000i128);
 }
