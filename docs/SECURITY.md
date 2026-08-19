@@ -92,6 +92,31 @@ Author lists are retained for 30 days after the last write.
 Implemented. Tips are transferred via the token contract passed to `initialize` and held in
 this contract's own token balance until claimed.
 
+### Custody Model
+
+**GistVault is custodial between tip and claim.** From the moment `tip_author` succeeds
+until the recipient calls `claim_tips`, the tipped funds sit in the contract's own token
+balance — not in the recipient's wallet, and not returnable to the tipper. This is a
+deliberate design choice, not an oversight:
+
+- **No recovery path for unclaimed funds.** If a recipient never calls `claim_tips` — a lost
+  key, an abandoned account, or simply never getting around to it — those funds have no
+  expiry, no admin override, and no path back to the tipper. They sit in the contract's
+  balance indefinitely. This version does not implement any admin-recovery or timeout
+  mechanism.
+- **Why this tradeoff:** an admin-recovery path would mean an admin key can move user funds
+  under some condition, which is a strictly weaker trust model than "only the recipient can
+  ever claim their own tips." For a protocol whose stated principles include being
+  permissionless and not requiring trust in any operator, we chose trustless-but-unrecoverable
+  over recoverable-but-admin-trusted. A future version could revisit this (e.g. a long-dated
+  timeout that returns unclaimed funds to the tipper), but that is out of scope for the
+  current implementation and would need its own design and auth review before shipping.
+- **What is bounded:** the *processing* of a tip (the `tip_author` call itself) is
+  idempotent and auth-checked — see the Idempotency note in
+  [`GIST_VAULT.md`](GIST_VAULT.md#design-notes). What's explicitly *not* bounded is how long
+  a recipient can wait before claiming; that's an accepted, permanent characteristic of this
+  design, not a bug.
+
 ### Invariants
 
 1. **No overflow on tip amounts.** Tip and balance values use `i128`. All arithmetic uses

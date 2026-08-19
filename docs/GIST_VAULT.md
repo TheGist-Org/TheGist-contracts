@@ -75,6 +75,16 @@ the recipient claims — it is a lifetime counter per `gist_id`, not per author)
 
 ## Design notes
 
+- **Custody model:** `GistVault` is custodial escrow between `tip_author` and `claim_tips` —
+  tipped funds sit in the contract's own token balance, not the recipient's wallet, until
+  claimed. **There is no recovery path for unclaimed funds in this version**: no expiry, no
+  admin override, no way to return them to the tipper if the recipient never claims. This is
+  a deliberate tradeoff, not an oversight — an admin-recovery mechanism would mean an admin
+  key can move user funds under some condition, which is strictly weaker than "only the
+  recipient can ever claim their own tips." Given the protocol's stated permissionless,
+  trust-nothing principles, this version chooses trustless-but-unrecoverable over
+  recoverable-but-admin-trusted. See [SECURITY.md](./SECURITY.md#custody-model) for the full
+  rationale and the residual risk this carries.
 - **Idempotency:** `tip_author` requires a caller-supplied `idempotency_key`. Stellar's
   account-sequence-number replay protection only stops the *literal same signed envelope*
   from being submitted twice — it does nothing for the far more common case of a client
