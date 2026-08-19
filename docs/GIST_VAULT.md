@@ -75,6 +75,33 @@ brand new attempt (see Design notes below for the residual risk this implies).
 - **Events:** emits `GistTipped` (see [EVENTS.md](./EVENTS.md)) — not re-emitted on a no-op
   retry.
 
+### `tip_authors(env: Env, tipper: Address, tips: Vec<BatchTipItem>, idempotency_key: BytesN<32>)`
+Sends multiple tips in a single atomic transaction. One `require_auth()` from the tipper,
+one summed token transfer (cheaper than N separate transfers), then a loop applying each
+item's bookkeeping and fee split individually. Emits one `GistTippedEvent` per item so
+downstream consumers don't need batch-specific logic.
+- **Atomic semantics:** if any item is invalid (zero amount, nonexistent gist, wrong
+  recipient, etc.), the **entire** batch reverts — no partial success. This is intentional:
+  a single typo'd `gist_id` should not silently succeed while blocking retry of the other
+  items.
+- **Batch size cap:** 20 items maximum (`MAX_BATCH_SIZE`). Matches the precedent set by
+  `GistRegistry::batch_expire`. Validated against Soroban's resource budget: a 20-item
+  batch uses ~40% of the instruction budget.
+- **Idempotency:** `idempotency_key` covers the entire batch. A retry with the same key
+  and identical parameters (same tipper, same total amount, same item count) is a no-op.
+  Batch and single-tip idempotency keys share the same namespace and TTL (48 hours).
+- **Auth:** requires `tipper.require_auth()`.
+- **Errors:**
+  - `"batch must not be empty"` if `tips.len() == 0`
+  - `"batch size exceeds maximum of 20"` if more than 20 items
+  - `"tip amount must be positive"` if any item has `amount <= 0`
+  - `"idempotency key reused with different parameters"` if the same key was already used
+    with different batch parameters
+  - Same per-item errors as `tip_author` (gist not found, gist not active, recipient
+    mismatch, fee overflow, etc.)
+  - `"fee_bps > 0 but no treasury configured"` if fees are enabled but no treasury set
+- **Events:** emits one `GistTipped` per item (see [EVENTS.md](./EVENTS.md)).
+
 ### `claim_tips(env: Env, recipient: Address) -> i128`
 Claims `recipient`'s full pending tip balance. The balance is zeroed in storage before the
 token transfer executes, so a reentrant or repeated call cannot double-spend it.

@@ -70,7 +70,7 @@ Use `getTransaction` with the transaction hash. Poll at the following cadence:
 | Extended (if still unknown) | 8 seconds | 15 | ~120 seconds |
 | **Total timeout** | — | — | **~160 seconds** |
 
-The initial phase covers ~10 ledgers (Storoban target is 5s ledger time; 4s poll catches
+The initial phase covers ~10 ledgers (Soroban target is 5s ledger time; 4s poll catches
 most). The extended phase handles node lag or transient RPC issues.
 
 > **Why 160 seconds?** Stellar's fast-finality model finalizes in ~2 rounds (~10s). A
@@ -114,7 +114,7 @@ If the state resolves to `UNKNOWN_TIMEOUT` and the user wants to retry:
 
 ### Step 5: Ledger reorg safety
 
-Storoban's consensus model has extremely low reorg probability (~0). However, the polling
+Soroban's consensus model has extremely low reorg probability (~0). However, the polling
 logic should still use a **confirmed-ledger threshold** for safety:
 
 - After `getTransaction` returns `SUCCESS`, wait **2 additional ledgers** (~10s) before

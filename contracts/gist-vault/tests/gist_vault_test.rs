@@ -1,5 +1,5 @@
 use gist_registry::{GistRegistry, GistRegistryClient};
-use gist_vault::{GistVault, GistVaultClient};
+use gist_vault::{BatchTipItem, GistVault, GistVaultClient};
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
 use soroban_sdk::{token, Address, Bytes, BytesN, Env, FromVal, String};
 
@@ -923,4 +923,262 @@ fn test_tip_various_amounts_with_fee() {
     // 3001: 3001 * 333 / 10_000 = 99 (floor), net = 2902
     vault_client.tip_author(&tipper, &author, &gist_id, &3001i128, &idem_key(&env, 3));
     assert_eq!(vault_client.get_pending_balance(&author), 298 + 2902);
+}
+
+// ── batch tipping: tip_authors ────────────────────────────────────────────
+
+fn batch_item(recipient: &Address, gist_id: u64, amount: i128) -> BatchTipItem {
+    BatchTipItem {
+        recipient: recipient.clone(),
+        gist_id,
+        amount,
+    }
+}
+
+#[test]
+fn test_tip_authors_basic_batch() {
+    let (env, tipper, token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author1 = Address::generate(&env);
+    let author2 = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id1 = registry_client.post_gist(&ipfs_cid, &geohash, &author1, &None);
+    let gist_id2 = registry_client.post_gist(&ipfs_cid, &geohash, &author2, &None);
+
+    let tips = soroban_sdk::vec![
+        &env,
+        batch_item(&author1, gist_id1, 100_000),
+        batch_item(&author2, gist_id2, 200_000),
+    ];
+
+    vault_client.tip_authors(&tipper, &tips, &idem_key(&env, 1));
+
+    assert_eq!(vault_client.get_pending_balance(&author1), 100_000);
+    assert_eq!(vault_client.get_pending_balance(&author2), 200_000);
+    assert_eq!(vault_client.get_total_tips_for_gist(&gist_id1), 100_000);
+    assert_eq!(vault_client.get_total_tips_for_gist(&gist_id2), 200_000);
+
+    let token_client = token::Client::new(&env, &token_id);
+    assert_eq!(token_client.balance(&tipper), 1_000_000 - 300_000);
+}
+
+#[test]
+fn test_tip_authors_single_item_batch() {
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    let tips = soroban_sdk::vec![&env, batch_item(&author, gist_id, 500_000)];
+    vault_client.tip_authors(&tipper, &tips, &idem_key(&env, 1));
+
+    assert_eq!(vault_client.get_pending_balance(&author), 500_000);
+}
+
+#[test]
+#[should_panic(expected = "batch must not be empty")]
+fn test_tip_authors_empty_batch_panics() {
+    let (env, tipper, _token_id, _vault_admin, vault_client, _registry_client) = setup();
+    let tips: soroban_sdk::Vec<BatchTipItem> = soroban_sdk::vec![&env];
+    vault_client.tip_authors(&tipper, &tips, &idem_key(&env, 1));
+}
+
+#[test]
+#[should_panic(expected = "batch size exceeds maximum of 20")]
+fn test_tip_authors_over_cap_panics() {
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    let tips: soroban_sdk::Vec<BatchTipItem> = soroban_sdk::vec![
+        &env,
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000),
+        batch_item(&author, gist_id, 1_000), // 21st item
+    ];
+    vault_client.tip_authors(&tipper, &tips, &idem_key(&env, 1));
+}
+
+#[test]
+#[should_panic(expected = "tip amount must be positive")]
+fn test_tip_authors_zero_amount_reverts_all() {
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    let tips = soroban_sdk::vec![
+        &env,
+        batch_item(&author, gist_id, 100_000),
+        batch_item(&author, gist_id, 0), // invalid
+    ];
+    vault_client.tip_authors(&tipper, &tips, &idem_key(&env, 1));
+}
+
+#[test]
+#[should_panic(expected = "gist not found in GistRegistry")]
+fn test_tip_authors_nonexistent_gist_reverts_all() {
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    let tips = soroban_sdk::vec![
+        &env,
+        batch_item(&author, gist_id, 100_000),
+        batch_item(&author, 999, 100_000), // nonexistent
+    ];
+    vault_client.tip_authors(&tipper, &tips, &idem_key(&env, 1));
+}
+
+#[test]
+fn test_tip_authors_idempotent_retry_same_args() {
+    let (env, tipper, token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+    let key = idem_key(&env, 1);
+
+    let tips = soroban_sdk::vec![
+        &env,
+        batch_item(&author, gist_id, 100_000),
+        batch_item(&author, gist_id, 200_000),
+    ];
+
+    vault_client.tip_authors(&tipper, &tips, &key);
+    // Retry with same key and same args — should be a no-op.
+    vault_client.tip_authors(&tipper, &tips, &key);
+
+    assert_eq!(vault_client.get_pending_balance(&author), 300_000);
+    assert_eq!(vault_client.get_total_tips_for_gist(&gist_id), 300_000);
+
+    let token_client = token::Client::new(&env, &token_id);
+    assert_eq!(token_client.balance(&tipper), 1_000_000 - 300_000);
+}
+
+#[test]
+#[should_panic(expected = "idempotency key reused with different parameters")]
+fn test_tip_authors_idempotent_different_args_panics() {
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+    let key = idem_key(&env, 1);
+
+    let tips1 = soroban_sdk::vec![&env, batch_item(&author, gist_id, 100_000)];
+    let tips2 = soroban_sdk::vec![&env, batch_item(&author, gist_id, 200_000)];
+
+    vault_client.tip_authors(&tipper, &tips1, &key);
+    vault_client.tip_authors(&tipper, &tips2, &key); // different amount
+}
+
+#[test]
+fn test_tip_authors_with_fee_split() {
+    let (env, tipper, token_id, vault_admin, vault_client, registry_client) = setup();
+    let treasury = Address::generate(&env);
+    let author1 = Address::generate(&env);
+    let author2 = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id1 = registry_client.post_gist(&ipfs_cid, &geohash, &author1, &None);
+    let gist_id2 = registry_client.post_gist(&ipfs_cid, &geohash, &author2, &None);
+
+    vault_client.set_treasury(&vault_admin, &treasury);
+    vault_client.set_fee_bps(&vault_admin, &500u32); // 5%
+
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_id);
+    token_admin_client.mint(&tipper, &5_000_000);
+
+    let tips = soroban_sdk::vec![
+        &env,
+        batch_item(&author1, gist_id1, 1_000_000),
+        batch_item(&author2, gist_id2, 2_000_000),
+    ];
+
+    vault_client.tip_authors(&tipper, &tips, &idem_key(&env, 1));
+
+    // author1: fee=50_000, net=950_000
+    // author2: fee=100_000, net=1_900_000
+    assert_eq!(vault_client.get_pending_balance(&author1), 950_000);
+    assert_eq!(vault_client.get_pending_balance(&author2), 1_900_000);
+
+    let token_client = token::Client::new(&env, &token_id);
+    assert_eq!(token_client.balance(&treasury), 150_000); // 50K + 100K
+}
+
+#[test]
+fn test_tip_authors_emits_individual_events() {
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    let tips = soroban_sdk::vec![
+        &env,
+        batch_item(&author, gist_id, 100_000),
+        batch_item(&author, gist_id, 200_000),
+    ];
+
+    vault_client.tip_authors(&tipper, &tips, &idem_key(&env, 1));
+
+    let events = env.events().all();
+    let tipped_count = events
+        .iter()
+        .filter(|e| {
+            e.1.len() >= 2
+                && soroban_sdk::Symbol::from_val(&env, &e.1.get_unchecked(0))
+                    == soroban_sdk::symbol_short!("vault")
+                && soroban_sdk::Symbol::from_val(&env, &e.1.get_unchecked(1))
+                    == soroban_sdk::symbol_short!("tipped")
+        })
+        .count();
+    assert_eq!(
+        tipped_count, 2,
+        "expected one GistTipped event per batch item"
+    );
+}
+
+#[test]
+fn test_tip_authors_max_batch_size_allowed() {
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    let mut tips_vec = soroban_sdk::vec![&env];
+    for i in 0..20u32 {
+        tips_vec.push_back(batch_item(&author, gist_id, (i as i128 + 1) * 1_000));
+    }
+
+    vault_client.tip_authors(&tipper, &tips_vec, &idem_key(&env, 1));
+
+    // Sum of 1..20 * 1000 = 210_000
+    assert_eq!(vault_client.get_pending_balance(&author), 210_000);
 }
