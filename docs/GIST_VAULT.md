@@ -15,9 +15,11 @@ Storage keys are defined by the internal `DataKey` enum, all in **instance** sto
 | `DataKey::Admin` | `Address` | The admin address, set once via `initialize` |
 | `DataKey::TokenAddress` | `Address` | The token contract used for tips, set once via `initialize` |
 | `DataKey::RegistryAddress` | `Address` | The `GistRegistry` contract address, set once via `initialize` |
-| `DataKey::PendingBalance(Address)` | `i128` | An author's claimable tip balance |
-| `DataKey::GistTotalTips(u64)` | `i128` | Running total of tips a specific gist has received |
+| `DataKey::PendingBalance(Address)` | `i128` | An author's claimable tip balance (net of any protocol fee) |
+| `DataKey::GistTotalTips(u64)` | `i128` | Running gross total of tips a specific gist has received |
 | `DataKey::TipRecord(BytesN<32>)` | `TipRecord` | What a given idempotency key already did, kept in **temporary** storage for 48 hours |
+| `DataKey::FeeBps` | `u32` | Protocol fee rate in basis points (0 = disabled, max 1000 = 10%) |
+| `DataKey::Treasury` | `Address` | Treasury address that receives protocol fees (optional, only needed when `fee_bps > 0`) |
 
 ## Full function reference
 
@@ -31,9 +33,23 @@ Updates the `GistRegistry` address. Only callable by the admin.
 - **Auth:** requires `admin.require_auth()`.
 - **Errors:** panics with `"caller is not the admin"` if caller is not the stored admin.
 
+### `set_fee_bps(env: Env, admin: Address, bps: u32)`
+Sets the protocol fee rate in basis points (1 bps = 0.01%). Only callable by the admin.
+- **Range:** 0 (disabled) to 1000 (10%). Panics with `"fee exceeds maximum of 1000 bps (10%)"` above that.
+- **Behavior:** fee changes are **not** retroactive — they apply to the next `tip_author` call only; already-escrowed pending balances are unaffected.
+- **Auth:** requires `admin.require_auth()`.
+- **Errors:** panics with `"caller is not the admin"` if caller is not the stored admin.
+
+### `set_treasury(env: Env, admin: Address, treasury: Address)`
+Sets the treasury address that receives protocol fees. Only callable by the admin.
+- **Behavior:** must be set before any `tip_author` call when `fee_bps > 0`. If `fee_bps > 0` and no treasury is configured, `tip_author` panics.
+- **Auth:** requires `admin.require_auth()`.
+- **Errors:** panics with `"caller is not the admin"` if caller is not the stored admin.
+
 ### `tip_author(env: Env, tipper: Address, recipient: Address, gist_id: u64, amount: i128, idempotency_key: BytesN<32>)`
-Transfers `amount` of the vault's token from `tipper` into escrow (this contract's own
-token balance), crediting it against `recipient`'s pending balance and `gist_id`'s running
+Sends a tip to a gist's author. If a protocol fee is configured (`fee_bps > 0`), the tip is
+split atomically: the fee is transferred to the treasury and the net amount is credited to
+`recipient`'s pending balance. The full gross amount is recorded against `gist_id`'s running
 tip total. **Verifies** that the gist exists in `GistRegistry`, is active, and that
 `recipient` matches the gist's author.
 
@@ -50,6 +66,8 @@ brand new attempt (see Design notes below for the residual risk this implies).
   - `"idempotency key reused with different parameters"` if the same key was already used
     with a different `tipper`, `recipient`, `gist_id`, or `amount` — this is either a client
     bug or a collision, not a legitimate retry
+  - `"fee_bps > 0 but no treasury configured"` if fees are enabled but no treasury address
+    has been set via `set_treasury`
   - `"registry address not set"` if `initialize` was not called
   - `"gist not found in GistRegistry"` if the gist_id doesn't exist
   - `"gist is not active"` if the gist has been expired
@@ -107,5 +125,18 @@ the recipient claims — it is a lifetime counter per `gist_id`, not per author)
 - **No overflow:** balance and total updates use `checked_add`, matching the invariant in
   [SECURITY.md](./SECURITY.md).
 - **Admin model:** the admin is set at initialization and can update the registry address
-  via `set_registry_address`. There is no mechanism to change the admin or token after
-  initialization — redeploy if those need to change.
+  via `set_registry_address`, the fee rate via `set_fee_bps`, and the treasury address via
+  `set_treasury`. There is no mechanism to change the admin or token after initialization —
+  redeploy if those need to change.
+- **Protocol fee (gross-vs-net accounting):** `GistTotalTips(gist_id)` records the **gross**
+  (pre-fee) tip amount — this is the public "this gist earned X" figure matching the
+  tipper-facing framing. `PendingBalance(recipient)` records the **net** (post-fee) amount —
+  this is what the author can actually claim. The `GistTipped` event contains all three
+  fields (`amount`, `fee`, `net`) so downstream consumers can reconstruct either view.
+- **Fee rounding:** the protocol fee uses floor rounding (`amount * bps / 10_000`). The
+  remainder always favors the recipient, not the protocol. This is a deliberate product
+  decision: for small tips where the fee rounds to zero, the author receives the full amount
+  and the treasury receives nothing — no zero-value transfer is attempted.
+- **Fee cap:** the maximum fee is 1000 bps (10%). This is enforced in `set_fee_bps` and
+  cannot be exceeded. Changes are not retroactive — already-escrowed pending balances are
+  unaffected by fee rate changes.

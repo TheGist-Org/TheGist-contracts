@@ -63,12 +63,17 @@ Emitted when a user tips a gist author.
 |-------|------|-------------|
 | `gist_id` | `u64` | ID of the tipped gist |
 | `recipient` | `Address` | Author receiving the tip |
-| `amount` | `i128` | Amount tipped (in stroops) |
+| `amount` | `i128` | Gross amount tipped (in stroops) |
+| `fee` | `i128` | Protocol fee taken from the tip (in stroops) |
+| `net` | `i128` | Net amount credited to the recipient (in stroops) |
 
 ```
 topics = [symbol("vault"), symbol("tipped")]
-data   = GistTippedEvent { gist_id, recipient, amount }
+data   = GistTippedEvent { gist_id, recipient, amount, fee, net }
 ```
+
+`amount = fee + net` always holds. When no fee is configured, `fee = 0` and
+`net = amount`.
 
 ---
 
