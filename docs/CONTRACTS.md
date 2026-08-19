@@ -29,7 +29,7 @@ See [`LOCATION_VERIFIER.md`](./LOCATION_VERIFIER.md) for the full function refer
 
 An optional tipping vault intended to let users send anonymous XLM tips to gist authors, which authors can later withdraw.
 
-**Current status:** `GistVault` is fully implemented. `tip_author` verifies the gist exists in `GistRegistry` and that the recipient matches the gist's author before transferring tokens into escrow; `claim_tips` lets the author withdraw. See [`GIST_VAULT.md`](./GIST_VAULT.md) for the full function reference.
+**Current status:** `GistVault` is fully implemented. `tip_author` verifies the gist exists in `GistRegistry` and that the recipient matches the gist's author before transferring tokens into escrow; `claim_tips` lets the author withdraw. An optional protocol fee (up to 10%) can be configured by the admin, atomically splitting each tip between a treasury address and the author. See [`GIST_VAULT.md`](./GIST_VAULT.md) for the full function reference.
 
 ## How they interact
 

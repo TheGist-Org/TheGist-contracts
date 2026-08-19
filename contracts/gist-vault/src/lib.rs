@@ -11,6 +11,8 @@ use soroban_sdk::{
 
 const LEDGERS_PER_HOUR: u32 = 720;
 const TIP_RECORD_TTL_HOURS: u32 = 48;
+const MAX_FEE_BPS: u32 = 1_000;
+const BPS_DENOMINATOR: i128 = 10_000;
 
 #[contracttype]
 enum DataKey {
@@ -20,6 +22,8 @@ enum DataKey {
     PendingBalance(Address),
     GistTotalTips(u64),
     TipRecord(BytesN<32>),
+    FeeBps,
+    Treasury,
 }
 
 /// Records what a given idempotency key already did, so a retried `tip_author` call with
@@ -60,6 +64,8 @@ pub struct GistTippedEvent {
     pub gist_id: u64,
     pub recipient: Address,
     pub amount: i128,
+    pub fee: i128,
+    pub net: i128,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -126,6 +132,17 @@ impl GistVault {
             .expect("registry address not set")
     }
 
+    fn read_fee_bps(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::FeeBps)
+            .unwrap_or(0u32)
+    }
+
+    fn read_treasury(env: &Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Treasury)
+    }
+
     fn tip_record_key(idempotency_key: &BytesN<32>) -> DataKey {
         DataKey::TipRecord(idempotency_key.clone())
     }
@@ -181,9 +198,28 @@ impl GistVault {
             .set(&DataKey::RegistryAddress, &new_registry);
     }
 
+    /// Set the protocol fee rate in basis points (1 bps = 0.01%). Maximum is 1000 bps
+    /// (10%). Setting to 0 disables the fee entirely. Only callable by the admin.
+    ///
+    /// Fee changes are not retroactive — they apply to the next `tip_author` call only;
+    /// already-escrowed pending balances are unaffected.
+    pub fn set_fee_bps(env: Env, admin: Address, bps: u32) {
+        Self::ensure_admin(&env, &admin);
+        assert!(bps <= MAX_FEE_BPS, "fee exceeds maximum of 1000 bps (10%)");
+        env.storage().instance().set(&DataKey::FeeBps, &bps);
+    }
+
+    /// Set the treasury address that receives protocol fees. Only callable by the admin.
+    /// Must be set before any tip with `fee_bps > 0` is attempted.
+    pub fn set_treasury(env: Env, admin: Address, treasury: Address) {
+        Self::ensure_admin(&env, &admin);
+        env.storage().instance().set(&DataKey::Treasury, &treasury);
+    }
+
     /// Send a tip to a gist's author. Verifies the gist exists in GistRegistry and that
-    /// `recipient` matches the gist's author. Transfers `amount` of the vault's token from
-    /// `tipper` into escrow, credited against `recipient`'s pending balance and `gist_id`'s
+    /// `recipient` matches the gist's author. If a protocol fee is configured, the tip is
+    /// split atomically: the fee goes to the treasury and the net amount is credited to
+    /// `recipient`'s pending balance. The full gross amount is recorded against `gist_id`'s
     /// running tip total.
     ///
     /// `idempotency_key` makes retries of the same logical tip attempt safe: a repeated call
@@ -222,14 +258,41 @@ impl GistVault {
             "recipient does not match gist author"
         );
 
+        // Compute fee and net. Floor rounding: the remainder favors the recipient.
+        let bps = Self::read_fee_bps(&env);
+        let fee: i128 = if bps > 0 {
+            if Self::read_treasury(&env).is_none() {
+                panic!("fee_bps > 0 but no treasury configured");
+            }
+            amount
+                .checked_mul(bps as i128)
+                .expect("fee calculation overflow")
+                .checked_div(BPS_DENOMINATOR)
+                .expect("fee calculation division error")
+        } else {
+            0
+        };
+
+        let net = amount.checked_sub(fee).expect("fee exceeds tip amount");
+
+        // Transfer gross amount from tipper into escrow.
         let token_client = token::Client::new(&env, &Self::read_token(&env));
         token_client.transfer(&tipper, &env.current_contract_address(), &amount);
 
+        // Atomically route fee to treasury (only when fee > 0).
+        if fee > 0 {
+            let treasury =
+                Self::read_treasury(&env).expect("fee_bps > 0 but no treasury configured");
+            token_client.transfer(&env.current_contract_address(), &treasury, &fee);
+        }
+
+        // Credit net (post-fee) to recipient's pending balance.
         let new_pending = Self::read_pending(&env, &recipient)
-            .checked_add(amount)
+            .checked_add(net)
             .expect("pending balance overflow");
         Self::write_pending(&env, &recipient, new_pending);
 
+        // Record gross amount against gist total (tipper-facing "this gist earned X").
         let new_total = Self::read_gist_total(&env, gist_id)
             .checked_add(amount)
             .expect("gist total overflow");
@@ -252,6 +315,8 @@ impl GistVault {
                 gist_id,
                 recipient,
                 amount,
+                fee,
+                net,
             },
         );
     }

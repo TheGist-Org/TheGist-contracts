@@ -1,7 +1,7 @@
 use gist_registry::{GistRegistry, GistRegistryClient};
 use gist_vault::{GistVault, GistVaultClient};
-use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::{token, Address, Bytes, BytesN, Env, String};
+use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
+use soroban_sdk::{token, Address, Bytes, BytesN, Env, FromVal, String};
 
 /// Deterministic, distinct idempotency keys for tests — one seed per logical tip attempt.
 fn idem_key(env: &Env, seed: u8) -> BytesN<32> {
@@ -461,4 +461,466 @@ fn test_tip_amounts_summing_past_i128_max_panic() {
 
     vault_client.tip_author(&tipper, &author, &gist_id, &big, &idem_key(&env, 1));
     vault_client.tip_author(&other_tipper, &author, &gist_id, &big, &idem_key(&env, 2));
+}
+
+// ── protocol fee: set_fee_bps / set_treasury ────────────────────────────────
+
+#[test]
+fn test_set_fee_bps_by_admin() {
+    let (_env, _tipper, _token_id, vault_admin, vault_client, _registry_client) = setup();
+    vault_client.set_fee_bps(&vault_admin, &500u32);
+    // No panic means success — we verify indirectly via tipping below.
+}
+
+#[test]
+#[should_panic(expected = "caller is not the admin")]
+fn test_set_fee_bps_wrong_admin_panics() {
+    let (env, _tipper, _token_id, _vault_admin, vault_client, _registry_client) = setup();
+    let impostor = Address::generate(&env);
+    vault_client.set_fee_bps(&impostor, &500u32);
+}
+
+#[test]
+#[should_panic(expected = "fee exceeds maximum of 1000 bps (10%)")]
+fn test_set_fee_bps_over_max_panics() {
+    let (_env, _tipper, _token_id, vault_admin, vault_client, _registry_client) = setup();
+    vault_client.set_fee_bps(&vault_admin, &1001u32);
+}
+
+#[test]
+fn test_set_fee_bps_at_max_is_allowed() {
+    let (_env, _tipper, _token_id, vault_admin, vault_client, _registry_client) = setup();
+    vault_client.set_fee_bps(&vault_admin, &1000u32);
+}
+
+#[test]
+fn test_set_treasury_by_admin() {
+    let (env, _tipper, _token_id, vault_admin, vault_client, _registry_client) = setup();
+    let treasury = Address::generate(&env);
+    vault_client.set_treasury(&vault_admin, &treasury);
+}
+
+#[test]
+#[should_panic(expected = "caller is not the admin")]
+fn test_set_treasury_wrong_admin_panics() {
+    let (env, _tipper, _token_id, _vault_admin, vault_client, _registry_client) = setup();
+    let impostor = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    vault_client.set_treasury(&impostor, &treasury);
+}
+
+// ── protocol fee: 0% fee (default) ─────────────────────────────────────────
+
+#[test]
+fn test_tip_with_zero_fee_configured_no_split() {
+    let (env, tipper, token_id, vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    // Explicitly set fee to 0
+    vault_client.set_fee_bps(&vault_admin, &0u32);
+
+    vault_client.tip_author(
+        &tipper,
+        &author,
+        &gist_id,
+        &1_000_000i128,
+        &idem_key(&env, 1),
+    );
+
+    // Author gets the full amount
+    assert_eq!(vault_client.get_pending_balance(&author), 1_000_000i128);
+    assert_eq!(
+        vault_client.get_total_tips_for_gist(&gist_id),
+        1_000_000i128
+    );
+
+    let token_client = token::Client::new(&env, &token_id);
+    assert_eq!(token_client.balance(&tipper), 0i128);
+}
+
+// ── protocol fee: normal 5% rate ────────────────────────────────────────────
+
+#[test]
+fn test_tip_with_fee_splits_correctly() {
+    let (env, tipper, token_id, vault_admin, vault_client, registry_client) = setup();
+    let treasury = Address::generate(&env);
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    vault_client.set_treasury(&vault_admin, &treasury);
+    vault_client.set_fee_bps(&vault_admin, &500u32); // 5%
+
+    // tip = 1_000_000, fee = 1_000_000 * 500 / 10_000 = 50_000, net = 950_000
+    vault_client.tip_author(
+        &tipper,
+        &author,
+        &gist_id,
+        &1_000_000i128,
+        &idem_key(&env, 1),
+    );
+
+    assert_eq!(vault_client.get_pending_balance(&author), 950_000i128);
+    assert_eq!(
+        vault_client.get_total_tips_for_gist(&gist_id),
+        1_000_000i128
+    );
+
+    let token_client = token::Client::new(&env, &token_id);
+    assert_eq!(token_client.balance(&treasury), 50_000i128);
+    assert_eq!(token_client.balance(&author), 0i128);
+}
+
+// ── protocol fee: maximum 10% rate ──────────────────────────────────────────
+
+#[test]
+fn test_tip_with_max_fee_10_percent() {
+    let (env, tipper, token_id, vault_admin, vault_client, registry_client) = setup();
+    let treasury = Address::generate(&env);
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    vault_client.set_treasury(&vault_admin, &treasury);
+    vault_client.set_fee_bps(&vault_admin, &1000u32); // 10%
+
+    // tip = 1_000_000, fee = 1_000_000 * 1000 / 10_000 = 100_000, net = 900_000
+    vault_client.tip_author(
+        &tipper,
+        &author,
+        &gist_id,
+        &1_000_000i128,
+        &idem_key(&env, 1),
+    );
+
+    assert_eq!(vault_client.get_pending_balance(&author), 900_000i128);
+    assert_eq!(
+        vault_client.get_total_tips_for_gist(&gist_id),
+        1_000_000i128
+    );
+
+    let token_client = token::Client::new(&env, &token_id);
+    assert_eq!(token_client.balance(&treasury), 100_000i128);
+}
+
+// ── protocol fee: rounding → fee = 0 ────────────────────────────────────────
+
+#[test]
+fn test_tip_small_amount_fee_rounds_to_zero() {
+    let (env, tipper, token_id, vault_admin, vault_client, registry_client) = setup();
+    let treasury = Address::generate(&env);
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    vault_client.set_treasury(&vault_admin, &treasury);
+    vault_client.set_fee_bps(&vault_admin, &500u32); // 5%
+
+    // tip = 1, fee = 1 * 500 / 10_000 = 0 (floor rounding), net = 1
+    vault_client.tip_author(&tipper, &author, &gist_id, &1i128, &idem_key(&env, 1));
+
+    assert_eq!(vault_client.get_pending_balance(&author), 1i128);
+    assert_eq!(vault_client.get_total_tips_for_gist(&gist_id), 1i128);
+
+    let token_client = token::Client::new(&env, &token_id);
+    // Treasury gets 0 — no transfer attempted (zero-value transfer skipped)
+    assert_eq!(token_client.balance(&treasury), 0i128);
+}
+
+// ── protocol fee: floor rounding behavior ───────────────────────────────────
+
+#[test]
+fn test_tip_floor_rounding_favors_recipient() {
+    let (env, tipper, _token_id, vault_admin, vault_client, registry_client) = setup();
+    let treasury = Address::generate(&env);
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    vault_client.set_treasury(&vault_admin, &treasury);
+    vault_client.set_fee_bps(&vault_admin, &333u32); // 3.33%
+
+    // tip = 100, fee = 100 * 333 / 10_000 = 3 (floor), net = 97
+    vault_client.tip_author(&tipper, &author, &gist_id, &100i128, &idem_key(&env, 1));
+    assert_eq!(vault_client.get_pending_balance(&author), 97i128);
+
+    // tip = 101, fee = 101 * 333 / 10_000 = 3 (floor), net = 98
+    vault_client.tip_author(&tipper, &author, &gist_id, &101i128, &idem_key(&env, 2));
+    assert_eq!(vault_client.get_pending_balance(&author), 97 + 98);
+}
+
+// ── protocol fee: gross vs net accounting ───────────────────────────────────
+
+#[test]
+fn test_gist_total_records_gross_not_net() {
+    let (env, tipper, _token_id, vault_admin, vault_client, registry_client) = setup();
+    let treasury = Address::generate(&env);
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    vault_client.set_treasury(&vault_admin, &treasury);
+    vault_client.set_fee_bps(&vault_admin, &500u32); // 5%
+
+    vault_client.tip_author(
+        &tipper,
+        &author,
+        &gist_id,
+        &1_000_000i128,
+        &idem_key(&env, 1),
+    );
+
+    // Gist total = gross (1_000_000), pending balance = net (950_000)
+    assert_eq!(
+        vault_client.get_total_tips_for_gist(&gist_id),
+        1_000_000i128
+    );
+    assert_eq!(vault_client.get_pending_balance(&author), 950_000i128);
+}
+
+// ── protocol fee: missing treasury when fees enabled ────────────────────────
+
+#[test]
+#[should_panic(expected = "fee_bps > 0 but no treasury configured")]
+fn test_tip_with_fee_no_treasury_panics() {
+    let (env, tipper, _token_id, vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    // Set fee but no treasury
+    vault_client.set_fee_bps(&vault_admin, &500u32);
+
+    vault_client.tip_author(
+        &tipper,
+        &author,
+        &gist_id,
+        &1_000_000i128,
+        &idem_key(&env, 1),
+    );
+}
+
+// ── protocol fee: correct treasury transfer ─────────────────────────────────
+
+#[test]
+fn test_fee_transferred_to_treasury_not_tipper() {
+    let (env, tipper, token_id, vault_admin, vault_client, registry_client) = setup();
+    let treasury = Address::generate(&env);
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    vault_client.set_treasury(&vault_admin, &treasury);
+    vault_client.set_fee_bps(&vault_admin, &100u32); // 1%
+
+    vault_client.tip_author(
+        &tipper,
+        &author,
+        &gist_id,
+        &1_000_000i128,
+        &idem_key(&env, 1),
+    );
+
+    // Fee goes to treasury, not to tipper or author directly
+    let token_client = token::Client::new(&env, &token_id);
+    assert_eq!(token_client.balance(&treasury), 10_000i128); // 1% of 1M
+    assert_eq!(token_client.balance(&tipper), 0i128); // tipper paid 1M
+    assert_eq!(token_client.balance(&author), 0i128); // author pending, not claimed
+}
+
+// ── protocol fee: claim works with net balance ──────────────────────────────
+
+#[test]
+fn test_claim_after_tip_with_fee() {
+    let (env, tipper, token_id, vault_admin, vault_client, registry_client) = setup();
+    let treasury = Address::generate(&env);
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    vault_client.set_treasury(&vault_admin, &treasury);
+    vault_client.set_fee_bps(&vault_admin, &500u32); // 5%
+
+    vault_client.tip_author(
+        &tipper,
+        &author,
+        &gist_id,
+        &1_000_000i128,
+        &idem_key(&env, 1),
+    );
+    let claimed = vault_client.claim_tips(&author);
+    assert_eq!(claimed, 950_000i128);
+
+    let token_client = token::Client::new(&env, &token_id);
+    assert_eq!(token_client.balance(&author), 950_000i128);
+}
+
+// ── protocol fee: multiple tips accumulate correctly ────────────────────────
+
+#[test]
+fn test_multiple_tips_with_fee_accumulate() {
+    let (env, tipper, _token_id, vault_admin, vault_client, registry_client) = setup();
+    let treasury = Address::generate(&env);
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    vault_client.set_treasury(&vault_admin, &treasury);
+    vault_client.set_fee_bps(&vault_admin, &500u32); // 5%
+
+    // Fund the tipper with enough for two tips
+    let token_admin_client = token::StellarAssetClient::new(&env, &_token_id);
+    token_admin_client.mint(&tipper, &5_000_000);
+
+    // Tip 1: fee=50_000, net=950_000; Tip 2: fee=100_000, net=1_900_000
+    vault_client.tip_author(
+        &tipper,
+        &author,
+        &gist_id,
+        &1_000_000i128,
+        &idem_key(&env, 1),
+    );
+    vault_client.tip_author(
+        &tipper,
+        &author,
+        &gist_id,
+        &2_000_000i128,
+        &idem_key(&env, 2),
+    );
+
+    assert_eq!(vault_client.get_pending_balance(&author), 2_850_000i128); // 950K + 1.9M
+    assert_eq!(
+        vault_client.get_total_tips_for_gist(&gist_id),
+        3_000_000i128
+    ); // gross
+}
+
+// ── protocol fee: idempotent retry respects fee ────────────────────────────
+
+#[test]
+fn test_idempotent_retry_no_second_fee_transfer() {
+    let (env, tipper, token_id, vault_admin, vault_client, registry_client) = setup();
+    let treasury = Address::generate(&env);
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+    let key = idem_key(&env, 1);
+
+    vault_client.set_treasury(&vault_admin, &treasury);
+    vault_client.set_fee_bps(&vault_admin, &500u32);
+
+    vault_client.tip_author(&tipper, &author, &gist_id, &1_000_000i128, &key);
+    // Retry with same key — should be a no-op
+    vault_client.tip_author(&tipper, &author, &gist_id, &1_000_000i128, &key);
+
+    let token_client = token::Client::new(&env, &token_id);
+    assert_eq!(token_client.balance(&treasury), 50_000i128); // fee transferred once only
+    assert_eq!(vault_client.get_pending_balance(&author), 950_000i128); // net credited once
+}
+
+// ── protocol fee: event data ────────────────────────────────────────────────
+
+#[test]
+fn test_tip_event_emitted_with_fee_fields() {
+    let (env, tipper, _token_id, vault_admin, vault_client, registry_client) = setup();
+    let treasury = Address::generate(&env);
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    vault_client.set_treasury(&vault_admin, &treasury);
+    vault_client.set_fee_bps(&vault_admin, &500u32);
+
+    vault_client.tip_author(
+        &tipper,
+        &author,
+        &gist_id,
+        &1_000_000i128,
+        &idem_key(&env, 1),
+    );
+
+    // Verify GistTipped event was emitted — topics = [vault, tipped]
+    let events = env.events().all();
+    let tipped_count = events
+        .iter()
+        .filter(|e| {
+            e.1.len() >= 2
+                && soroban_sdk::Symbol::from_val(&env, &e.1.get_unchecked(0))
+                    == soroban_sdk::symbol_short!("vault")
+                && soroban_sdk::Symbol::from_val(&env, &e.1.get_unchecked(1))
+                    == soroban_sdk::symbol_short!("tipped")
+        })
+        .count();
+    assert_eq!(tipped_count, 1, "expected exactly one GistTipped event");
+}
+
+#[test]
+fn test_tip_event_zero_fee_emitted() {
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    vault_client.tip_author(
+        &tipper,
+        &author,
+        &gist_id,
+        &1_000_000i128,
+        &idem_key(&env, 1),
+    );
+
+    let events = env.events().all();
+    let tipped_count = events
+        .iter()
+        .filter(|e| {
+            e.1.len() >= 2
+                && soroban_sdk::Symbol::from_val(&env, &e.1.get_unchecked(0))
+                    == soroban_sdk::symbol_short!("vault")
+                && soroban_sdk::Symbol::from_val(&env, &e.1.get_unchecked(1))
+                    == soroban_sdk::symbol_short!("tipped")
+        })
+        .count();
+    assert_eq!(tipped_count, 1, "expected exactly one GistTipped event");
+}
+
+// ── protocol fee: odd tip amounts with various rates ────────────────────────
+
+#[test]
+fn test_tip_various_amounts_with_fee() {
+    let (env, tipper, _token_id, vault_admin, vault_client, registry_client) = setup();
+    let treasury = Address::generate(&env);
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    vault_client.set_treasury(&vault_admin, &treasury);
+    vault_client.set_fee_bps(&vault_admin, &333u32); // 3.33%
+
+    // 7 stroops: 7 * 333 / 10_000 = 0 (floor), net = 7
+    vault_client.tip_author(&tipper, &author, &gist_id, &7i128, &idem_key(&env, 1));
+    assert_eq!(vault_client.get_pending_balance(&author), 7i128);
+
+    // 300: 300 * 333 / 10_000 = 9 (floor), net = 291
+    vault_client.tip_author(&tipper, &author, &gist_id, &300i128, &idem_key(&env, 2));
+    assert_eq!(vault_client.get_pending_balance(&author), 298i128);
+
+    // 3001: 3001 * 333 / 10_000 = 99 (floor), net = 2902
+    vault_client.tip_author(&tipper, &author, &gist_id, &3001i128, &idem_key(&env, 3));
+    assert_eq!(vault_client.get_pending_balance(&author), 298 + 2902);
 }
