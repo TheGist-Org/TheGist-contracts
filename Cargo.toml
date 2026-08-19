@@ -4,6 +4,7 @@ members = [
     "contracts/gist-registry",
     "contracts/gist-vault",
     "contracts/location-verifier",
+    "tools/reconcile-vault",
 ]
 
 [workspace.dependencies]
