@@ -53,3 +53,49 @@ After a successful deployment, `.env.contracts` should contain:
 - `LOCATION_VERIFIER_CONTRACT_ID`
 
 Keep that file out of version control and commit only `.env.contracts.example`.
+
+## Fee-bump sponsorship (gasless tips)
+
+A sponsoring account can wrap a user's tip transaction in a Stellar **fee-bump transaction**
+so the tipper doesn't need to hold XLM for gas. This is the recommended pattern for
+production clients:
+
+1. The **sponsor** account pays the network fee and submits the fee-bump transaction.
+2. The **tipper** signs only the inner transaction (the `tip_author` or `tip_authors` call).
+3. The fee-bump wrapper is submitted by the sponsor's account, so the tipper never needs
+   a funded account for gas — only for the tip amount itself.
+
+### Example (Stellar CLI)
+
+```bash
+# 1. Build the inner transaction (tipper signs this)
+stellar tx build \
+  --source <TIPPER_ACCOUNT> \
+  --network testnet \
+  -- \
+  contract invoke \
+    --id <VAULT_CONTRACT_ID> \
+    --source <TIPPER_ACCOUNT> \
+    -- \
+    tip_author \
+      --tipper <TIPPER_ADDRESS> \
+      --recipient <AUTHOR_ADDRESS> \
+      --gist_id <GIST_ID> \
+      --amount <AMOUNT> \
+      --idempotency_key <KEY>
+
+# 2. Sign with the tipper's key
+stellar tx sign --source <TIPPER_SECRET_KEY>
+
+# 3. Wrap in a fee-bump and submit via the sponsor
+stellar tx bump-fee \
+  --base-fee 100_000 \
+  --sponsor <SPONSOR_ACCOUNT> \
+  --network testnet
+
+stellar tx send --network testnet
+```
+
+> **Note:** This repo defines and demonstrates the pattern via the existing
+> deploy/verify scripts. Actually running a sponsor service is out of scope — it is an
+> application-level concern for `TheGist-web` / `TheGist-mobile` to implement.

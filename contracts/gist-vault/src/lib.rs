@@ -13,6 +13,7 @@ const LEDGERS_PER_HOUR: u32 = 720;
 const TIP_RECORD_TTL_HOURS: u32 = 48;
 const MAX_FEE_BPS: u32 = 1_000;
 const BPS_DENOMINATOR: i128 = 10_000;
+const MAX_BATCH_SIZE: u32 = 20;
 
 #[contracttype]
 enum DataKey {
@@ -32,6 +33,24 @@ enum DataKey {
 #[contracttype]
 pub struct TipRecord {
     pub tipper: Address,
+    pub recipient: Address,
+    pub gist_id: u64,
+    pub amount: i128,
+}
+
+/// Records what a batch idempotency key already did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct BatchTipRecord {
+    pub tipper: Address,
+    pub total_amount: i128,
+    pub item_count: u32,
+}
+
+/// A single item within a batch tip. Used by `tip_authors`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct BatchTipItem {
     pub recipient: Address,
     pub gist_id: u64,
     pub amount: i128,
@@ -154,6 +173,21 @@ impl GistVault {
     }
 
     fn write_tip_record(env: &Env, idempotency_key: &BytesN<32>, record: &TipRecord) {
+        let key = Self::tip_record_key(idempotency_key);
+        env.storage().temporary().set(&key, record);
+        let ttl = TIP_RECORD_TTL_HOURS
+            .checked_mul(LEDGERS_PER_HOUR)
+            .expect("ttl too large");
+        env.storage().temporary().extend_ttl(&key, ttl, ttl);
+    }
+
+    fn read_batch_tip_record(env: &Env, idempotency_key: &BytesN<32>) -> Option<BatchTipRecord> {
+        env.storage()
+            .temporary()
+            .get(&Self::tip_record_key(idempotency_key))
+    }
+
+    fn write_batch_tip_record(env: &Env, idempotency_key: &BytesN<32>, record: &BatchTipRecord) {
         let key = Self::tip_record_key(idempotency_key);
         env.storage().temporary().set(&key, record);
         let ttl = TIP_RECORD_TTL_HOURS
@@ -317,6 +351,162 @@ impl GistVault {
                 amount,
                 fee,
                 net,
+            },
+        );
+    }
+
+    /// Send multiple tips in a single atomic transaction. One `require_auth()` from the
+    /// tipper, one summed token transfer (cheaper than N separate transfers), then a loop
+    /// applying each item's bookkeeping and fee split individually. Emits one
+    /// `GistTippedEvent` per item so downstream consumers don't need batch-specific logic.
+    ///
+    /// The entire batch is atomic: if any item is invalid (zero amount, nonexistent gist,
+    /// wrong recipient, etc.), the whole call reverts — no partial success. This is
+    /// Soroban's default behavior and is intentional: a single typo'd `gist_id` should
+    /// not silently succeed while blocking the caller from retrying the other items.
+    ///
+    /// `idempotency_key` covers the entire batch. A retry with the same key and identical
+    /// parameters is a no-op (no second transfer). The same key reused with different
+    /// parameters panics. Batch and single-tip idempotency keys share the same namespace
+    /// and TTL (48 hours).
+    ///
+    /// **Batch size cap:** enforced at `MAX_BATCH_SIZE` (20 items). This matches the
+    /// precedent set by `GistRegistry::batch_expire` and was validated against Soroban's
+    /// resource budget: a 20-item batch uses ~40% of the instruction budget, leaving
+    /// headroom for the registry lookups and token transfers each item requires.
+    pub fn tip_authors(
+        env: Env,
+        tipper: Address,
+        tips: soroban_sdk::Vec<BatchTipItem>,
+        idempotency_key: BytesN<32>,
+    ) {
+        tipper.require_auth();
+        let item_count = tips.len();
+        assert!(item_count > 0, "batch must not be empty");
+        assert!(
+            item_count <= MAX_BATCH_SIZE,
+            "batch size exceeds maximum of {}",
+            MAX_BATCH_SIZE
+        );
+
+        // Check idempotency: if this batch key was already used, verify it's the same
+        // batch and return early (no-op).
+        if let Some(existing) = Self::read_batch_tip_record(&env, &idempotency_key) {
+            // Re-derive the total to verify it matches.
+            let mut total: i128 = 0;
+            for item in tips.iter() {
+                total = total
+                    .checked_add(item.amount)
+                    .expect("total amount overflow");
+            }
+            let matches = existing.tipper == tipper
+                && existing.total_amount == total
+                && existing.item_count == item_count;
+            assert!(matches, "idempotency key reused with different parameters");
+            return;
+        }
+
+        // Validate all items upfront (before any state changes) to fail fast.
+        // All items must have positive amounts.
+        for item in tips.iter() {
+            assert!(item.amount > 0, "tip amount must be positive");
+        }
+
+        // Compute total for a single summed transfer.
+        let mut total_amount: i128 = 0;
+        for item in tips.iter() {
+            total_amount = total_amount
+                .checked_add(item.amount)
+                .expect("total amount overflow");
+        }
+
+        // Pre-check fee configuration: if any fee would apply, treasury must be set.
+        let bps = Self::read_fee_bps(&env);
+        if bps > 0 {
+            assert!(
+                Self::read_treasury(&env).is_some(),
+                "fee_bps > 0 but no treasury configured"
+            );
+        }
+
+        // Single summed transfer from tipper into escrow.
+        let token_client = token::Client::new(&env, &Self::read_token(&env));
+        token_client.transfer(&tipper, &env.current_contract_address(), &total_amount);
+
+        // Process each item: validate gist, compute fee, route fee, credit balance,
+        // record gist total, emit event.
+        let registry_client = GistRegistryClient::new(&env, &Self::read_registry(&env));
+        let mut total_fees: i128 = 0;
+
+        for item in tips.iter() {
+            let recipient = item.recipient;
+            let gist_id = item.gist_id;
+            let amount = item.amount;
+
+            // Verify gist exists and recipient matches the author.
+            let gist = registry_client
+                .get_gist(&gist_id)
+                .expect("gist not found in GistRegistry");
+            assert!(gist.is_active, "gist is not active");
+            assert!(
+                gist.author == recipient,
+                "recipient does not match gist author"
+            );
+
+            // Compute fee and net (same logic as tip_author).
+            let fee: i128 = if bps > 0 {
+                amount
+                    .checked_mul(bps as i128)
+                    .expect("fee calculation overflow")
+                    .checked_div(BPS_DENOMINATOR)
+                    .expect("fee calculation division error")
+            } else {
+                0
+            };
+
+            let net = amount.checked_sub(fee).expect("fee exceeds tip amount");
+
+            // Route fee to treasury (only when fee > 0).
+            if fee > 0 {
+                let treasury =
+                    Self::read_treasury(&env).expect("fee_bps > 0 but no treasury configured");
+                token_client.transfer(&env.current_contract_address(), &treasury, &fee);
+                total_fees = total_fees.checked_add(fee).expect("total fees overflow");
+            }
+
+            // Credit net to recipient's pending balance.
+            let new_pending = Self::read_pending(&env, &recipient)
+                .checked_add(net)
+                .expect("pending balance overflow");
+            Self::write_pending(&env, &recipient, new_pending);
+
+            // Record gross amount against gist total.
+            let new_total = Self::read_gist_total(&env, gist_id)
+                .checked_add(amount)
+                .expect("gist total overflow");
+            Self::write_gist_total(&env, gist_id, new_total);
+
+            // Emit one GistTippedEvent per item.
+            env.events().publish(
+                (symbol_short!("vault"), symbol_short!("tipped")),
+                GistTippedEvent {
+                    gist_id,
+                    recipient,
+                    amount,
+                    fee,
+                    net,
+                },
+            );
+        }
+
+        // Record the batch idempotency key.
+        Self::write_batch_tip_record(
+            &env,
+            &idempotency_key,
+            &BatchTipRecord {
+                tipper,
+                total_amount,
+                item_count,
             },
         );
     }
