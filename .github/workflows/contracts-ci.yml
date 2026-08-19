@@ -59,4 +59,4 @@ jobs:
         with:
           targets: wasm32v1-none
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --workspace --target wasm32v1-none --release
+      - run: cargo build --workspace --exclude reconcile-vault --target wasm32v1-none --release
