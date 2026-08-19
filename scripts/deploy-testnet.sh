@@ -65,7 +65,9 @@ stellar contract invoke \
   --source "$DEPLOYER" \
   --network "$NETWORK_NAME" \
   -- initialize \
-  --token "$NATIVE_TOKEN_ID"
+  --token "$NATIVE_TOKEN_ID" \
+  --admin "$DEPLOYER_ADDRESS" \
+  --registry "$GIST_REGISTRY_CONTRACT_ID"
 
 stellar contract invoke \
   --id "$LOCATION_VERIFIER_CONTRACT_ID" \
