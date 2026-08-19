@@ -1,6 +1,6 @@
 use gist_registry::{GistRegistry, GistRegistryClient};
 use gist_vault::{GistVault, GistVaultClient};
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{token, Address, Bytes, BytesN, Env, String};
 
 /// Deterministic, distinct idempotency keys for tests — one seed per logical tip attempt.
@@ -363,4 +363,102 @@ fn test_tip_different_keys_are_independent_even_with_identical_args() {
     vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128, &idem_key(&env, 2));
 
     assert_eq!(vault_client.get_pending_balance(&author), 200_000i128);
+}
+
+#[test]
+#[should_panic(expected = "idempotency key reused with different parameters")]
+fn test_tip_retry_same_key_different_tipper_panics() {
+    let (env, tipper, token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+    let key = idem_key(&env, 1);
+
+    // A second, unrelated tipper happens to fund and reuse the exact same key —
+    // whether that's a broken key-generation scheme on the client or a deliberate
+    // collision attempt, it must not be treated as author's own retry.
+    let other_tipper = Address::generate(&env);
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_id);
+    token_admin_client.mint(&other_tipper, &1_000_000);
+
+    vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128, &key);
+    vault_client.tip_author(&other_tipper, &author, &gist_id, &100_000i128, &key);
+}
+
+#[test]
+fn test_tip_retry_after_ttl_expiry_is_treated_as_fresh() {
+    let (env, tipper, token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    // Post with the max allowed TTL (168h) so the gist itself outlives the ledger
+    // jump below — this test isolates the idempotency record's own 48h TTL, not the
+    // gist's separate (and shorter, by default) expiry.
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &Some(168));
+    let key = idem_key(&env, 1);
+
+    vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128, &key);
+    assert_eq!(vault_client.get_pending_balance(&author), 100_000i128);
+
+    // Advancing the ledger far enough to expire the TipRecord would also archive
+    // every contract's own instance storage (vault, registry, token) in the test
+    // sandbox — a real long-lived deployment needs routine keep-alive TTL bumps
+    // regardless of this feature, so extend those *before* the jump to isolate what
+    // we're actually testing: the *temporary* TipRecord's shorter TTL. An entry that
+    // has already gone archived can't simply have its TTL bumped afterward — on a
+    // real network that requires an explicit restore, and the test sandbox enforces
+    // the same rule.
+    for contract_id in [&vault_client.address, &registry_client.address, &token_id] {
+        env.as_contract(contract_id, || {
+            env.storage().instance().extend_ttl(100_000, 100_000);
+        });
+    }
+
+    // Advance well past the 48h / 34,560-ledger TTL window documented in
+    // docs/GIST_VAULT.md — the idempotency record has expired by now.
+    let current = env.ledger().sequence();
+    env.ledger().set_sequence_number(current + 48 * 720 + 1);
+
+    // This is the accepted residual risk, made concrete: a key reused after the TTL
+    // window is treated as a brand new attempt, not protected forever. Same key,
+    // same args — but it's now a second, real tip, not a no-op.
+    vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128, &key);
+    assert_eq!(vault_client.get_pending_balance(&author), 200_000i128);
+
+    let token_client = token::Client::new(&env, &token_id);
+    assert_eq!(token_client.balance(&tipper), 1_000_000i128 - 200_000i128);
+}
+
+#[test]
+#[should_panic(expected = "balance overflow")]
+fn test_tip_amounts_summing_past_i128_max_panic() {
+    let (env, tipper, token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    // A single token balance (and therefore a single tip) can never itself exceed
+    // i128::MAX — the token contract's own balance guard would reject that. So we use
+    // two separate tippers, each funding an amount comfortably under i128::MAX, whose
+    // *sum* overflows once both have been transferred into the vault's own holdings.
+    //
+    // Note this panics from the *token contract's* own balance-overflow guard
+    // ("balance overflow in receive_balance" on the vault's own account), not from
+    // GistVault's `checked_add` on `pending_balance`/`gist_total`. That guard is real
+    // and correct, but realistically unreachable via this public API: an author's
+    // pending balance (or a gist's tip total) can never exceed the vault's own
+    // aggregate token holdings, since every credited stroop corresponds to a stroop
+    // already actually transferred in — so the token's own i128 ceiling on the
+    // vault's account is always hit first. It remains as defense-in-depth in case
+    // that invariant is ever broken by a future change.
+    let big: i128 = i128::MAX / 2 + 1;
+    let other_tipper = Address::generate(&env);
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_id);
+    token_admin_client.mint(&tipper, &big);
+    token_admin_client.mint(&other_tipper, &big);
+
+    vault_client.tip_author(&tipper, &author, &gist_id, &big, &idem_key(&env, 1));
+    vault_client.tip_author(&other_tipper, &author, &gist_id, &big, &idem_key(&env, 2));
 }
