@@ -82,9 +82,9 @@ Use the scripted flow in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 | Contract | Address |
 |----------|---------|
-| GistRegistry | `CDYTQBTHWK6PFJVASLMGVFUCXP7P4WKWILGYGCNRUNE5D52J7HUQGFM4` |
-| GistVault | `CC67YHBSB5FIKSJVIYN2YVRSTEKMPM5HR7GSUOUX7UPR4SJ4QFYMSYQP` |
-| LocationVerifier | `CCWPJXB4TFQKHLAFBYNCFWO3EGNSQD42CA5TBH324OXUFAJOC7BVWN7D` |
+| GistRegistry | `CAKNDXSK6VVNVC2LOGGI77RHG2MJBHH7TCST3QGDVI7LH64V6KYXAHTF` |
+| GistVault | `CBGLIGQKIZZR6FAXIVVGSF53A5JTTJBJKTMJCTYUYCE2WB4JXUUGZS5F` |
+| LocationVerifier | `CBKFEYLR326K4NHUPK5RJ3XBXMTSWPBT47E74PTWGL4STJLXUBLMUCJZ` |
 
 > These contract instances are deployed and verified on Soroban Testnet. Each address can be
 > independently checked against the live network, e.g.:
