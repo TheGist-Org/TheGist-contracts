@@ -14,6 +14,11 @@ const TIP_RECORD_TTL_HOURS: u32 = 48;
 const MAX_FEE_BPS: u32 = 1_000;
 const BPS_DENOMINATOR: i128 = 10_000;
 const MAX_BATCH_SIZE: u32 = 20;
+// PendingBalance/GistTotalTips are durable financial state with no natural expiry — a tip
+// can sit unclaimed indefinitely. Requesting a long TTL keeps the entry from being archived
+// under ordinary activity; the host clamps this to the network's actual `max_entry_ttl` if
+// it's smaller, so it's safe to ask for more than any real network currently allows.
+const BALANCE_TTL_HOURS: u32 = 24 * 365 * 10;
 
 #[contracttype]
 enum DataKey {
@@ -111,30 +116,38 @@ impl GistVault {
         DataKey::GistTotalTips(gist_id)
     }
 
+    fn balance_ttl_ledgers() -> u32 {
+        BALANCE_TTL_HOURS
+            .checked_mul(LEDGERS_PER_HOUR)
+            .expect("ttl too large")
+    }
+
     fn read_pending(env: &Env, recipient: &Address) -> i128 {
         env.storage()
-            .instance()
+            .persistent()
             .get(&Self::pending_key(recipient))
             .unwrap_or(0i128)
     }
 
     fn write_pending(env: &Env, recipient: &Address, balance: i128) {
-        env.storage()
-            .instance()
-            .set(&Self::pending_key(recipient), &balance);
+        let key = Self::pending_key(recipient);
+        env.storage().persistent().set(&key, &balance);
+        let ttl = Self::balance_ttl_ledgers();
+        env.storage().persistent().extend_ttl(&key, ttl, ttl);
     }
 
     fn read_gist_total(env: &Env, gist_id: u64) -> i128 {
         env.storage()
-            .instance()
+            .persistent()
             .get(&Self::gist_tips_key(gist_id))
             .unwrap_or(0i128)
     }
 
     fn write_gist_total(env: &Env, gist_id: u64, total: i128) {
-        env.storage()
-            .instance()
-            .set(&Self::gist_tips_key(gist_id), &total);
+        let key = Self::gist_tips_key(gist_id);
+        env.storage().persistent().set(&key, &total);
+        let ttl = Self::balance_ttl_ledgers();
+        env.storage().persistent().extend_ttl(&key, ttl, ttl);
     }
 
     fn read_token(env: &Env) -> Address {

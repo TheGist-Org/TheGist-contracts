@@ -1182,3 +1182,130 @@ fn test_tip_authors_max_batch_size_allowed() {
     // Sum of 1..20 * 1000 = 210_000
     assert_eq!(vault_client.get_pending_balance(&author), 210_000);
 }
+
+// ── persistent storage migration: PendingBalance / GistTotalTips ───────────
+//
+// These tests specifically exercise the fix for unbounded instance-storage growth:
+// `PendingBalance(Address)` and `GistTotalTips(u64)` moved from instance storage (a single
+// ledger entry shared by the whole contract) to persistent storage (one independently
+// keyed, independently TTL-managed ledger entry per recipient/gist).
+
+#[test]
+fn test_many_recipients_and_gists_remain_independently_addressable() {
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+
+    // A count well past what would ever fit sanely in a single instance-storage blob,
+    // to demonstrate each recipient/gist gets its own persistent ledger entry rather
+    // than growing one shared map.
+    const N: u32 = 30;
+    let mut authors: std::vec::Vec<Address> = std::vec::Vec::new();
+    let mut gist_ids: std::vec::Vec<u64> = std::vec::Vec::new();
+
+    for i in 0..N {
+        let author = Address::generate(&env);
+        let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+        let amount = (i as i128 + 1) * 1_000;
+        vault_client.tip_author(
+            &tipper,
+            &author,
+            &gist_id,
+            &amount,
+            &idem_key(&env, i as u8),
+        );
+        authors.push(author);
+        gist_ids.push(gist_id);
+    }
+
+    for i in 0..N {
+        let expected = (i as i128 + 1) * 1_000;
+        assert_eq!(
+            vault_client.get_pending_balance(&authors[i as usize]),
+            expected,
+            "recipient {i}'s balance was affected by another recipient's key"
+        );
+        assert_eq!(
+            vault_client.get_total_tips_for_gist(&gist_ids[i as usize]),
+            expected,
+            "gist {i}'s total was affected by another gist's key"
+        );
+    }
+}
+
+#[test]
+fn test_claiming_one_recipients_balance_does_not_affect_another() {
+    let (env, tipper, token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author1 = Address::generate(&env);
+    let author2 = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id1 = registry_client.post_gist(&ipfs_cid, &geohash, &author1, &None);
+    let gist_id2 = registry_client.post_gist(&ipfs_cid, &geohash, &author2, &None);
+
+    vault_client.tip_author(
+        &tipper,
+        &author1,
+        &gist_id1,
+        &100_000i128,
+        &idem_key(&env, 1),
+    );
+    vault_client.tip_author(
+        &tipper,
+        &author2,
+        &gist_id2,
+        &250_000i128,
+        &idem_key(&env, 2),
+    );
+
+    let claimed = vault_client.claim_tips(&author1);
+    assert_eq!(claimed, 100_000i128);
+    assert_eq!(vault_client.get_pending_balance(&author1), 0i128);
+    // author2's persistent entry must be untouched by author1's claim.
+    assert_eq!(vault_client.get_pending_balance(&author2), 250_000i128);
+
+    let token_client = token::Client::new(&env, &token_id);
+    assert_eq!(token_client.balance(&author1), 100_000i128);
+    assert_eq!(token_client.balance(&author2), 0i128);
+
+    // Gist totals (gross, lifetime counters) are unaffected by claims entirely.
+    assert_eq!(vault_client.get_total_tips_for_gist(&gist_id1), 100_000i128);
+    assert_eq!(vault_client.get_total_tips_for_gist(&gist_id2), 250_000i128);
+}
+
+#[test]
+fn test_pending_balance_and_gist_total_survive_long_ledger_advance_without_restore() {
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+    vault_client.tip_author(&tipper, &author, &gist_id, &100_000i128, &idem_key(&env, 1));
+    assert_eq!(vault_client.get_pending_balance(&author), 100_000i128);
+    assert_eq!(vault_client.get_total_tips_for_gist(&gist_id), 100_000i128);
+
+    // Keep the vault contract's own instance storage alive across the jump below —
+    // that's a routine keep-alive concern for any long-lived contract, orthogonal to
+    // what this test is proving, and mirrors the pattern used in
+    // `test_tip_retry_after_ttl_expiry_is_treated_as_fresh` above (extend before the
+    // jump; an already-archived entry can't have its TTL bumped after the fact).
+    env.as_contract(&vault_client.address, || {
+        env.storage().instance().extend_ttl(1_100_000, 1_100_000);
+    });
+
+    // Advance ~60 days: comfortably past the 48h TTL that would have irrecoverably
+    // deleted this data had it stayed on *temporary* storage (as PendingBalance and
+    // GistTotalTips did in the pre-fix instance-storage design's neighbor, TipRecord),
+    // and comfortably under the test sandbox's default ~1-year max_entry_ttl so the
+    // persistent-storage TTL extension requested on write is enough to survive it
+    // without needing an explicit `RestoreFootprintOp`. (This intentionally does not
+    // exercise `claim_tips` post-jump: that would additionally depend on the escrow
+    // token contract's own balance-entry TTL, a separate, pre-existing operational
+    // concern for the custody model that is orthogonal to this fix.)
+    let current = env.ledger().sequence();
+    env.ledger().set_sequence_number(current + 60 * 24 * 720);
+
+    assert_eq!(vault_client.get_pending_balance(&author), 100_000i128);
+    assert_eq!(vault_client.get_total_tips_for_gist(&gist_id), 100_000i128);
+}
