@@ -24,19 +24,11 @@ LOCATION_VERIFIER_WASM="${LOCATION_VERIFIER_WASM:-$WASM_DIR/location_verifier.wa
 HORIZON_URL="${HORIZON_URL:-https://horizon-testnet.stellar.org}"
 MIN_DEPLOYER_XLM="${MIN_DEPLOYER_XLM:-10}"
 
-command -v stellar >/dev/null 2>&1 || {
-  echo "stellar CLI is required" >&2
-  exit 1
-}
-command -v curl >/dev/null 2>&1 || {
-  echo "curl is required to confirm the deployer funding" >&2
-  exit 1
-}
+# shellcheck source=deploy-lib.sh
+source "$ROOT_DIR/scripts/deploy-lib.sh"
 
-# Progress goes to stderr so that stdout stays clean wherever this script's
-# functions are captured via command substitution.
-log() { printf '%s\n' "$*" >&2; }
-die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+require_cmd stellar
+require_cmd curl
 
 cd "$ROOT_DIR"
 
@@ -44,14 +36,17 @@ stellar network add "$NETWORK_NAME" \
   --rpc-url "$RPC_URL" \
   --network-passphrase "$NETWORK_PASSPHRASE" >/dev/null 2>&1 || true
 
+log "building contract WASM artifacts..."
+# Exclude the host-only reconcile-vault tool: it links tokio/reqwest and
+# cannot be compiled for the wasm32v1-none target. cargo build fails loudly
+# under set -e; the artifact existence check below only guards against
+# misconfigured GIST_*_WASM overrides and runs after the build so a clean
+# checkout works end to end.
+cargo build --workspace --exclude reconcile-vault --target wasm32v1-none --release >/dev/null
+
 for wasm_path in "$GIST_REGISTRY_WASM" "$GIST_VAULT_WASM" "$LOCATION_VERIFIER_WASM"; do
   [[ -f "$wasm_path" ]] || die "missing WASM artifact: $wasm_path"
 done
-
-log "building contract WASM artifacts..."
-# Exclude the host-only reconcile-vault tool: it links tokio/reqwest and
-# cannot be compiled for the wasm32v1-none target.
-cargo build --workspace --exclude reconcile-vault --target wasm32v1-none --release >/dev/null
 
 # ---------------------------------------------------------------------------
 # Fund the deployer — loudly.
@@ -66,7 +61,7 @@ DEPLOYER_ADDRESS="$(stellar keys address "$DEPLOYER")"
 
 if ! fund_out="$(stellar keys fund "$DEPLOYER" --network "$NETWORK_NAME" 2>&1)"; then
   log "friendbot funding returned an error (the account may already be funded):"
-  printf '%s\n' "$fund_out"
+  printf '%s\n' "$fund_out" >&2
 fi
 
 account_exists_on_horizon() {
@@ -107,36 +102,35 @@ log "deployer funded: $balance XLM available"
 # ---------------------------------------------------------------------------
 # Deploy contracts — unambiguous ID extraction.
 #
-# The deploy exit code is captured explicitly and every extracted ID must
-# match the StrKey contract shape exactly. A bare `grep | tail -n 1` can pick
-# up any C-prefixed 56-char string from error output without failing, which
-# is how nonexistent-but-valid-looking IDs ended up in README.md (#67).
+# The deploy exit code is captured explicitly and the contract ID is taken
+# from stdout only, never from merged stderr, so progress/error text can
+# never masquerade as the ID.
 # ---------------------------------------------------------------------------
-is_contract_id() {
-  [[ "${1:-}" =~ ^C[A-Z0-9]{55}$ ]]
-}
-
-extract_contract_id() {
-  grep -oE 'C[A-Z0-9]{55}' | tail -n 1 || true
-}
-
 deploy_contract() {
   local name="$1" wasm_path="$2"
-  local out rc=0 id
+  local out err rc=0 id
   log "deploying $name from $(basename "$wasm_path")..."
+  err="$(mktemp)"
   out="$(stellar contract deploy \
     --wasm "$wasm_path" \
     --source "$DEPLOYER" \
-    --network "$NETWORK_NAME" 2>&1)" || rc=$?
+    --network "$NETWORK_NAME" 2>"$err")" || rc=$?
   if [[ $rc -ne 0 ]]; then
-    printf '%s\n' "$out" >&2
+    cat "$err" >&2
+    rm -f "$err"
     die "deploy of $name failed (exit code $rc)"
   fi
   id="$(printf '%s\n' "$out" | extract_contract_id)"
   if ! is_contract_id "$id"; then
-    printf 'raw deploy output:\n%s\n' "$out" >&2
+    {
+      printf 'raw deploy stdout:\n%s\n' "$out"
+      printf '--- deploy stderr ---\n'
+      cat "$err"
+    } >&2
+    rm -f "$err"
     die "deploy of $name produced no valid contract ID (captured: '${id:-<empty>}')"
   fi
+  rm -f "$err"
   log "$name deployed at $id"
   printf '%s' "$id"
 }
@@ -151,37 +145,26 @@ NATIVE_TOKEN_ID="$(stellar contract id asset --asset native --network "$NETWORK_
 if ! is_contract_id "$NATIVE_TOKEN_ID"; then
   NATIVE_TOKEN_ID="$(stellar contract asset id --asset native --network "$NETWORK_NAME" | extract_contract_id)"
 fi
-is_contract_id "$NATIVE_TOKEN_ID" \
-  || die "could not resolve the native token (SAC) contract ID (captured: '${NATIVE_TOKEN_ID:-<empty>}')"
+require_contract_id "$NATIVE_TOKEN_ID" "native token (SAC) lookup"
 
 # ---------------------------------------------------------------------------
 # Initialize
 # ---------------------------------------------------------------------------
-invoke_contract() {
-  local id="$1"
-  shift
-  stellar contract invoke \
-    --id "$id" \
-    --source "$DEPLOYER" \
-    --network "$NETWORK_NAME" \
-    -- "$@"
-}
-
 log "initializing contracts..."
-invoke_contract "$GIST_REGISTRY_CONTRACT_ID" initialize --admin "$DEPLOYER_ADDRESS"
+contract_invoke "$DEPLOYER" "$NETWORK_NAME" "$GIST_REGISTRY_CONTRACT_ID" initialize --admin "$DEPLOYER_ADDRESS"
 
-invoke_contract "$LOCATION_VERIFIER_CONTRACT_ID" initialize --admin "$DEPLOYER_ADDRESS"
+contract_invoke "$DEPLOYER" "$NETWORK_NAME" "$LOCATION_VERIFIER_CONTRACT_ID" initialize --admin "$DEPLOYER_ADDRESS"
 
-invoke_contract "$GIST_VAULT_CONTRACT_ID" initialize \
+contract_invoke "$DEPLOYER" "$NETWORK_NAME" "$GIST_VAULT_CONTRACT_ID" initialize \
   --token "$NATIVE_TOKEN_ID" \
   --admin "$DEPLOYER_ADDRESS" \
   --registry "$GIST_REGISTRY_CONTRACT_ID"
 
-invoke_contract "$LOCATION_VERIFIER_CONTRACT_ID" set_registry_address \
+contract_invoke "$DEPLOYER" "$NETWORK_NAME" "$LOCATION_VERIFIER_CONTRACT_ID" set_registry_address \
   --caller "$DEPLOYER_ADDRESS" \
   --registry_address "$GIST_REGISTRY_CONTRACT_ID"
 
-invoke_contract "$LOCATION_VERIFIER_CONTRACT_ID" add_allowed_prefix \
+contract_invoke "$DEPLOYER" "$NETWORK_NAME" "$LOCATION_VERIFIER_CONTRACT_ID" add_allowed_prefix \
   --caller "$DEPLOYER_ADDRESS" \
   --prefix "$DEFAULT_ALLOWED_PREFIX"
 
@@ -193,21 +176,19 @@ invoke_contract "$LOCATION_VERIFIER_CONTRACT_ID" add_allowed_prefix \
 # ---------------------------------------------------------------------------
 log "verifying freshly deployed contracts on-chain..."
 
-registry_version="$(invoke_contract "$GIST_REGISTRY_CONTRACT_ID" get_contract_version | grep -oE '[0-9]+' | tail -n 1 || true)"
-[[ "$registry_version" =~ ^[0-9]+$ ]] \
-  || die "post-deploy verification failed: GistRegistry.get_contract_version returned '${registry_version:-<empty>}'"
+registry_version="$(contract_invoke "$DEPLOYER" "$NETWORK_NAME" "$GIST_REGISTRY_CONTRACT_ID" get_contract_version | extract_uint)"
+require_uint "$registry_version" "GistRegistry.get_contract_version"
 
-vault_balance="$(invoke_contract "$GIST_VAULT_CONTRACT_ID" get_pending_balance --author "$DEPLOYER_ADDRESS" | grep -oE -- '-?[0-9]+' | tail -n 1 || true)"
-[[ "$vault_balance" =~ ^-?[0-9]+$ ]] \
-  || die "post-deploy verification failed: GistVault.get_pending_balance returned '${vault_balance:-<empty>}'"
+vault_balance="$(contract_invoke "$DEPLOYER" "$NETWORK_NAME" "$GIST_VAULT_CONTRACT_ID" get_pending_balance --author "$DEPLOYER_ADDRESS" | extract_int)"
+require_int "$vault_balance" "GistVault.get_pending_balance"
 
-verified_registry="$(invoke_contract "$LOCATION_VERIFIER_CONTRACT_ID" get_registry_address | extract_contract_id)"
+verified_registry="$(contract_invoke "$DEPLOYER" "$NETWORK_NAME" "$LOCATION_VERIFIER_CONTRACT_ID" get_registry_address | extract_contract_id)"
+require_contract_id "$verified_registry" "LocationVerifier.get_registry_address"
 [[ "$verified_registry" == "$GIST_REGISTRY_CONTRACT_ID" ]] \
-  || die "post-deploy verification failed: LocationVerifier registry mismatch (expected $GIST_REGISTRY_CONTRACT_ID, got '${verified_registry:-<empty>}')"
+  || die "post-deploy verification failed: LocationVerifier registry mismatch (expected $GIST_REGISTRY_CONTRACT_ID, got '$verified_registry')"
 
-prefix_ok="$(invoke_contract "$LOCATION_VERIFIER_CONTRACT_ID" verify_geohash --geohash "${DEFAULT_ALLOWED_PREFIX}x" | grep -oE 'true|false' | tail -n 1 || true)"
-[[ "$prefix_ok" == "true" ]] \
-  || die "post-deploy verification failed: allowed prefix '$DEFAULT_ALLOWED_PREFIX' check returned '${prefix_ok:-<empty>}'"
+prefix_ok="$(contract_invoke "$DEPLOYER" "$NETWORK_NAME" "$LOCATION_VERIFIER_CONTRACT_ID" verify_geohash --geohash "${DEFAULT_ALLOWED_PREFIX}x" | extract_bool)"
+require_true "$prefix_ok" "LocationVerifier.verify_geohash for allowed prefix '$DEFAULT_ALLOWED_PREFIX'"
 
 cat > "$ENV_FILE" <<EOF
 NETWORK_NAME="$NETWORK_NAME"

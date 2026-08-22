@@ -12,10 +12,10 @@ fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 
-command -v stellar >/dev/null 2>&1 || {
-  echo "stellar CLI is required" >&2
-  exit 1
-}
+# shellcheck source=deploy-lib.sh
+source "$ROOT_DIR/scripts/deploy-lib.sh"
+
+require_cmd stellar
 
 : "${NETWORK_NAME:?missing NETWORK_NAME}"
 : "${DEPLOYER:?missing DEPLOYER}"
@@ -25,36 +25,22 @@ command -v stellar >/dev/null 2>&1 || {
 : "${DEFAULT_ALLOWED_PREFIX:?missing DEFAULT_ALLOWED_PREFIX}"
 : "${DEPLOYER_ADDRESS:?missing DEPLOYER_ADDRESS}"
 
-contract_invoke() {
-  local contract_id="$1"
-  shift
-  stellar contract invoke \
-    --id "$contract_id" \
-    --source "$DEPLOYER" \
-    --network "$NETWORK_NAME" \
-    -- "$@"
-}
+registry_version="$(contract_invoke "$DEPLOYER" "$NETWORK_NAME" "$GIST_REGISTRY_CONTRACT_ID" get_version | extract_uint)"
+require_uint "$registry_version" "GistRegistry.get_version"
 
-registry_version="$(contract_invoke "$GIST_REGISTRY_CONTRACT_ID" get_version | grep -oE '[0-9]+' | tail -n 1 || true)"
-configured_registry="$(contract_invoke "$LOCATION_VERIFIER_CONTRACT_ID" get_registry_address | grep -oE 'C[A-Z0-9]{55}' | tail -n 1 || true)"
-vault_balance="$(contract_invoke "$GIST_VAULT_CONTRACT_ID" get_pending_balance --author "$DEPLOYER_ADDRESS" | grep -oE -- '-?[0-9]+' | tail -n 1 || true)"
-prefix_ok="$(contract_invoke "$LOCATION_VERIFIER_CONTRACT_ID" verify_geohash --geohash "${DEFAULT_ALLOWED_PREFIX}x" | grep -oE 'true|false' | tail -n 1 || true)"
+configured_registry="$(contract_invoke "$DEPLOYER" "$NETWORK_NAME" "$LOCATION_VERIFIER_CONTRACT_ID" get_registry_address | extract_contract_id)"
+require_contract_id "$configured_registry" "LocationVerifier.get_registry_address"
 
-if [[ ! "$registry_version" =~ ^[0-9]+$ ]]; then
-  echo "GistRegistry did not return a valid version (got '${registry_version:-<empty>}')" >&2
-  echo "Is $GIST_REGISTRY_CONTRACT_ID actually deployed on $NETWORK_NAME?" >&2
-  exit 1
-fi
+vault_balance="$(contract_invoke "$DEPLOYER" "$NETWORK_NAME" "$GIST_VAULT_CONTRACT_ID" get_pending_balance --author "$DEPLOYER_ADDRESS" | extract_int)"
+require_int "$vault_balance" "GistVault.get_pending_balance"
+
+prefix_ok="$(contract_invoke "$DEPLOYER" "$NETWORK_NAME" "$LOCATION_VERIFIER_CONTRACT_ID" verify_geohash --geohash "${DEFAULT_ALLOWED_PREFIX}x" | extract_bool)"
 
 if [[ "$configured_registry" != "$GIST_REGISTRY_CONTRACT_ID" ]]; then
-  echo "LocationVerifier registry mismatch: expected $GIST_REGISTRY_CONTRACT_ID, got $configured_registry" >&2
-  exit 1
+  die "LocationVerifier registry mismatch: expected $GIST_REGISTRY_CONTRACT_ID, got '$configured_registry'"
 fi
 
-if [[ "$prefix_ok" != "true" && "$prefix_ok" != "1" ]]; then
-  echo "LocationVerifier prefix check failed for $DEFAULT_ALLOWED_PREFIX" >&2
-  exit 1
-fi
+require_true "$prefix_ok" "LocationVerifier.verify_geohash for allowed prefix '$DEFAULT_ALLOWED_PREFIX'"
 
 cat <<EOF
 Deployment verified
