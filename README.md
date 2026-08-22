@@ -82,11 +82,13 @@ Use the scripted flow in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 | Contract | Address |
 |----------|---------|
-| GistRegistry | `CDGSGBXI2FBWA5WDJVZQJVWFUNIHGCAOIATQ4SIWVMLYLM3TZLYFJ7JS` |
-| GistVault | `CAZ2OD36TIDZ4R4L77SRVSD3X7AABSDH5ID7QSR2B5XZJLD2IIPQOC5O` |
-| LocationVerifier | `CD3LIFQ5GZ7X75Y4NMBFOSWNX7ZOBZ4IUXRXRST3W6EIDLFLGSHK7KDF` |
+| GistRegistry | `CAKNDXSK6VVNVC2LOGGI77RHG2MJBHH7TCST3QGDVI7LH64V6KYXAHTF` |
+| GistVault | `CBGLIGQKIZZR6FAXIVVGSF53A5JTTJBJKTMJCTYUYCE2WB4JXUUGZS5F` |
+| LocationVerifier | `CBKFEYLR326K4NHUPK5RJ3XBXMTSWPBT47E74PTWGL4STJLXUBLMUCJZ` |
 
-> These contract instances are deployed and verified on Soroban Testnet.
+> These contract instances are deployed and verified on Soroban Testnet. Each address can be
+> independently checked against the live network, e.g.:
+> `stellar contract info interface --id <address> --network testnet`.
 
 ---
 

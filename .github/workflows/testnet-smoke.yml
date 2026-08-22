@@ -28,7 +28,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install stellar-cli
-        run: cargo install --locked stellar-cli
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+          cargo install --locked stellar-cli
 
       - name: Write .env.contracts from secrets
         run: |
