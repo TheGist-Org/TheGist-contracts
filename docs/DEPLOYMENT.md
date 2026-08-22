@@ -21,15 +21,22 @@ cp .env.contracts.example .env.contracts
 The script:
 
 1. Adds the testnet network if it is not already configured.
-2. Builds all three contract wasm artifacts (one crate per contract).
-3. Creates or funds the deployer keypair.
+2. Builds all three contract wasm artifacts (one crate per contract; the host-only
+   `reconcile-vault` tool is excluded since it cannot target wasm32v1-none).
+3. Creates or funds the deployer keypair, then confirms on-chain (via Horizon) that the
+   account exists and holds at least `MIN_DEPLOYER_XLM` (default 10) XLM — a funding
+   failure aborts loudly instead of proceeding with an unfunded account.
 4. Deploys `GistRegistry`, `GistVault`, and `LocationVerifier` as three separate contract
-   instances, each from its own wasm.
+   instances, each from its own wasm. Every captured contract ID must match the StrKey
+   contract shape or the script aborts with a clear error.
 5. Initializes `GistRegistry` and `LocationVerifier` with the deployer address as admin, and
    `GistVault` with the native XLM token (SAC) address.
 6. Configures `LocationVerifier` with the deployed registry address.
 7. Adds the default geohash prefix.
-8. Writes the resulting IDs to `.env.contracts`.
+8. Verifies every freshly deployed contract with read-only calls (`get_contract_version`,
+   `get_pending_balance`, wired registry address, allowed-prefix check) before anything is
+   persisted.
+9. Writes the resulting IDs to `.env.contracts`.
 
 ## Verify
 

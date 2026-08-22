@@ -35,10 +35,16 @@ contract_invoke() {
     -- "$@"
 }
 
-registry_version="$(contract_invoke "$GIST_REGISTRY_CONTRACT_ID" get_version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | tail -n 1)"
-configured_registry="$(contract_invoke "$LOCATION_VERIFIER_CONTRACT_ID" get_registry_address | grep -oE 'C[A-Z0-9]{55}' | tail -n 1)"
-vault_balance="$(contract_invoke "$GIST_VAULT_CONTRACT_ID" get_pending_balance --author "$DEPLOYER_ADDRESS" | grep -oE '[0-9]+' | tail -n 1)"
-prefix_ok="$(contract_invoke "$LOCATION_VERIFIER_CONTRACT_ID" verify_geohash --geohash "${DEFAULT_ALLOWED_PREFIX}x" | grep -oE '(true|false)' | tail -n 1)"
+registry_version="$(contract_invoke "$GIST_REGISTRY_CONTRACT_ID" get_version | grep -oE '[0-9]+' | tail -n 1 || true)"
+configured_registry="$(contract_invoke "$LOCATION_VERIFIER_CONTRACT_ID" get_registry_address | grep -oE 'C[A-Z0-9]{55}' | tail -n 1 || true)"
+vault_balance="$(contract_invoke "$GIST_VAULT_CONTRACT_ID" get_pending_balance --author "$DEPLOYER_ADDRESS" | grep -oE -- '-?[0-9]+' | tail -n 1 || true)"
+prefix_ok="$(contract_invoke "$LOCATION_VERIFIER_CONTRACT_ID" verify_geohash --geohash "${DEFAULT_ALLOWED_PREFIX}x" | grep -oE 'true|false' | tail -n 1 || true)"
+
+if [[ ! "$registry_version" =~ ^[0-9]+$ ]]; then
+  echo "GistRegistry did not return a valid version (got '${registry_version:-<empty>}')" >&2
+  echo "Is $GIST_REGISTRY_CONTRACT_ID actually deployed on $NETWORK_NAME?" >&2
+  exit 1
+fi
 
 if [[ "$configured_registry" != "$GIST_REGISTRY_CONTRACT_ID" ]]; then
   echo "LocationVerifier registry mismatch: expected $GIST_REGISTRY_CONTRACT_ID, got $configured_registry" >&2
