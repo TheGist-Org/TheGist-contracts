@@ -1098,6 +1098,98 @@ fn test_tip_authors_idempotent_different_args_panics() {
 }
 
 #[test]
+#[should_panic(expected = "idempotency key reused with different parameters")]
+fn test_tip_authors_idempotent_same_total_different_recipients_panics() {
+    // Same tipper, same total (300_000), same item count (2) — only the distribution
+    // differs. The replay check must not treat this as an exact retry of batch A.
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author_a = Address::generate(&env);
+    let author_b = Address::generate(&env);
+    let author_c = Address::generate(&env);
+    let author_d = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id_a = registry_client.post_gist(&ipfs_cid, &geohash, &author_a, &None);
+    let gist_id_b = registry_client.post_gist(&ipfs_cid, &geohash, &author_b, &None);
+    let gist_id_c = registry_client.post_gist(&ipfs_cid, &geohash, &author_c, &None);
+    let gist_id_d = registry_client.post_gist(&ipfs_cid, &geohash, &author_d, &None);
+    let key = idem_key(&env, 1);
+
+    let tips1 = soroban_sdk::vec![
+        &env,
+        batch_item(&author_a, gist_id_a, 100_000),
+        batch_item(&author_b, gist_id_b, 200_000),
+    ];
+    let tips2 = soroban_sdk::vec![
+        &env,
+        batch_item(&author_c, gist_id_c, 50_000),
+        batch_item(&author_d, gist_id_d, 250_000),
+    ];
+
+    vault_client.tip_authors(&tipper, &tips1, &key);
+    vault_client.tip_authors(&tipper, &tips2, &key); // different distribution
+}
+
+#[test]
+#[should_panic(expected = "idempotency key reused with different parameters")]
+fn test_tip_authors_idempotent_same_total_redistributed_amounts_panics() {
+    // Same tipper, recipients, and gist IDs; same total and item count — but the
+    // per-item amounts are redistributed between the two items.
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author1 = Address::generate(&env);
+    let author2 = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id1 = registry_client.post_gist(&ipfs_cid, &geohash, &author1, &None);
+    let gist_id2 = registry_client.post_gist(&ipfs_cid, &geohash, &author2, &None);
+    let key = idem_key(&env, 1);
+
+    let tips1 = soroban_sdk::vec![
+        &env,
+        batch_item(&author1, gist_id1, 100_000),
+        batch_item(&author2, gist_id2, 200_000),
+    ];
+    let tips2 = soroban_sdk::vec![
+        &env,
+        batch_item(&author1, gist_id1, 150_000),
+        batch_item(&author2, gist_id2, 150_000),
+    ];
+
+    vault_client.tip_authors(&tipper, &tips1, &key);
+    vault_client.tip_authors(&tipper, &tips2, &key); // redistributed amounts
+}
+
+#[test]
+#[should_panic(expected = "idempotency key reused with different parameters")]
+fn test_tip_authors_idempotent_different_gist_id_panics() {
+    // Same tipper, recipient, amount, item count, and total — but the gist ID one
+    // item points at is different. Must be rejected, not treated as a retry.
+    let (env, tipper, _token_id, _vault_admin, vault_client, registry_client) = setup();
+    let author1 = Address::generate(&env);
+    let author2 = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+    let gist_id1 = registry_client.post_gist(&ipfs_cid, &geohash, &author1, &None);
+    let other_gist_by_author1 = registry_client.post_gist(&ipfs_cid, &geohash, &author1, &None);
+    let gist_id2 = registry_client.post_gist(&ipfs_cid, &geohash, &author2, &None);
+    let key = idem_key(&env, 1);
+
+    let tips1 = soroban_sdk::vec![
+        &env,
+        batch_item(&author1, gist_id1, 100_000),
+        batch_item(&author2, gist_id2, 200_000),
+    ];
+    let tips2 = soroban_sdk::vec![
+        &env,
+        batch_item(&author1, other_gist_by_author1, 100_000), // different gist_id
+        batch_item(&author2, gist_id2, 200_000),
+    ];
+
+    vault_client.tip_authors(&tipper, &tips1, &key);
+    vault_client.tip_authors(&tipper, &tips2, &key); // different gist ID
+}
+
+#[test]
 fn test_tip_authors_with_fee_split() {
     let (env, tipper, token_id, vault_admin, vault_client, registry_client) = setup();
     let treasury = Address::generate(&env);
