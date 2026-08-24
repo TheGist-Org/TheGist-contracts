@@ -43,13 +43,16 @@ pub struct TipRecord {
     pub amount: i128,
 }
 
-/// Records what a batch idempotency key already did.
+/// Records what a batch idempotency key already did. Stores the full item list so a
+/// retried key can be verified against the exact batch distribution — not just the
+/// aggregate total and item count, which different batches can share.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[contracttype]
 pub struct BatchTipRecord {
     pub tipper: Address,
     pub total_amount: i128,
     pub item_count: u32,
+    pub items: soroban_sdk::Vec<BatchTipItem>,
 }
 
 /// A single item within a batch tip. Used by `tip_authors`.
@@ -379,9 +382,10 @@ impl GistVault {
     /// not silently succeed while blocking the caller from retrying the other items.
     ///
     /// `idempotency_key` covers the entire batch. A retry with the same key and identical
-    /// parameters is a no-op (no second transfer). The same key reused with different
-    /// parameters panics. Batch and single-tip idempotency keys share the same namespace
-    /// and TTL (48 hours).
+    /// parameters is a no-op (no second transfer). Identity is checked item-for-item:
+    /// every recipient, gist ID, and amount must match the original batch, not just the
+    /// aggregate total and count. The same key reused with any different batch panics.
+    /// Batch and single-tip idempotency keys share the same namespace and TTL (48 hours).
     ///
     /// **Batch size cap:** enforced at `MAX_BATCH_SIZE` (20 items). This matches the
     /// precedent set by `GistRegistry::batch_expire` and was validated against Soroban's
@@ -403,7 +407,9 @@ impl GistVault {
         );
 
         // Check idempotency: if this batch key was already used, verify it's the same
-        // batch and return early (no-op).
+        // batch and return early (no-op). The full distribution (recipients, gist IDs,
+        // per-item amounts) must match — two batches can share the same tipper, total,
+        // and item count while paying different people.
         if let Some(existing) = Self::read_batch_tip_record(&env, &idempotency_key) {
             // Re-derive the total to verify it matches.
             let mut total: i128 = 0;
@@ -414,7 +420,8 @@ impl GistVault {
             }
             let matches = existing.tipper == tipper
                 && existing.total_amount == total
-                && existing.item_count == item_count;
+                && existing.item_count == item_count
+                && existing.items == tips;
             assert!(matches, "idempotency key reused with different parameters");
             return;
         }
@@ -512,7 +519,8 @@ impl GistVault {
             );
         }
 
-        // Record the batch idempotency key.
+        // Record the batch idempotency key (with the full distribution, so a later
+        // retry of this key can be verified item-for-item).
         Self::write_batch_tip_record(
             &env,
             &idempotency_key,
@@ -520,6 +528,7 @@ impl GistVault {
                 tipper,
                 total_amount,
                 item_count,
+                items: tips,
             },
         );
     }
