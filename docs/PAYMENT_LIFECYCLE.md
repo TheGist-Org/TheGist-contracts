@@ -170,6 +170,12 @@ map these to user-facing messages.
 |--------------|-----------|----------------------|
 | `"caller is not the admin"` | Non-admin called the function | "Only the vault admin can set the treasury address." |
 
+### `set_registry_address`
+
+| Panic message | Condition | User-facing suggestion |
+|--------------|-----------|----------------------|
+| `"caller is not the admin"` | Non-admin called the function | "Only the vault admin can change the registry address." |
+
 ### `tip_author`
 
 | Panic message | Condition | User-facing suggestion |
@@ -186,6 +192,33 @@ map these to user-facing messages.
 | `"pending balance overflow"` | Pending balance + net overflows i128 | "Author's pending balance is too large. Claim first." |
 | `"gist total overflow"` | Gist total + amount overflows i128 | "This gist has received too many tips. Claim first." |
 | `"registry address not set"` | Vault not initialized | "The vault is not configured. Please report this issue." |
+
+### `tip_authors`
+
+The batch is atomic: any invalid item or failure below reverts the entire batch. No
+tip, fee transfer, pending balance update, gist total update, or event from the
+batch is retained when the call fails.
+
+| Panic message | Condition | User-facing suggestion |
+|--------------|-----------|----------------------|
+| `"batch must not be empty"` | The batch contains no tip items | "Add at least one tip to the batch." |
+| `"batch size exceeds maximum of 20"` | The batch contains more than 20 items | "Split the tips into batches of at most 20." |
+| `"idempotency key reused with different parameters"` | Same key, different tipper, total amount, or item count | "A batch with this reference ID already exists with different summary details. Use a new reference ID." |
+| `"total amount overflow"` | Summing item amounts overflows i128 | "The combined tip amount is too large. Split the batch or use smaller amounts." |
+| `"tip amount must be positive"` | Any item amount is zero or negative | "Every tip in the batch must be greater than zero." |
+| `"fee_bps > 0 but no treasury configured"` | Fee enabled but no treasury set | "The vault is not fully configured. Please report this issue." |
+| `"gist not found in GistRegistry"` | Any item's gist_id doesn't exist on-chain | "One of the gists hasn't been posted to TheGist yet." |
+| `"gist is not active"` | Any item's gist has expired | "One of the gists is no longer active and cannot receive tips." |
+| `"recipient does not match gist author"` | Any item's recipient differs from its gist author | "Each tip must be sent to the corresponding gist author." |
+| `"fee calculation overflow"` | Any item amount multiplied by bps overflows i128 | "One of the tip amounts is too large. Try a smaller amount." |
+| `"fee calculation division error"` | Division error while calculating any item fee | "Internal error computing a fee. Please try again." |
+| `"fee exceeds tip amount"` | Any calculated fee exceeds its item amount | "Internal error: a fee exceeds its tip. Please try again." |
+| `"total fees overflow"` | Summing the per-item fees overflows i128 | "The combined fees are too large. Split the batch." |
+| `"pending balance overflow"` | Crediting any recipient's pending balance overflows i128 | "An author's pending balance is too large. Ask them to claim first." |
+| `"gist total overflow"` | Adding any item to its gist total overflows i128 | "A gist has received too many tips. Try again after balances are claimed." |
+
+Batch idempotency checks only the `tipper`, summed `total_amount`, and
+`item_count`. It does not compare each item's recipient, gist ID, or amount.
 
 ### `claim_tips`
 
