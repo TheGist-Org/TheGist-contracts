@@ -266,6 +266,23 @@ impl GistVault {
         env.storage().instance().set(&DataKey::Treasury, &treasury);
     }
 
+    /// Compute the protocol fee and net recipient amount for a tip.
+    /// Uses floor rounding: the remainder favors the recipient.
+    /// `bps` is validated by `set_fee_bps` to be at most `MAX_FEE_BPS`.
+    fn calculate_fee_and_net(amount: i128, bps: u32) -> (i128, i128) {
+        let fee: i128 = if bps > 0 {
+            amount
+                .checked_mul(bps as i128)
+                .expect("fee calculation overflow")
+                .checked_div(BPS_DENOMINATOR)
+                .expect("fee calculation division error")
+        } else {
+            0
+        };
+        let net = amount.checked_sub(fee).expect("fee exceeds tip amount");
+        (fee, net)
+    }
+
     /// Send a tip to a gist's author. Verifies the gist exists in GistRegistry and that
     /// `recipient` matches the gist's author. If a protocol fee is configured, the tip is
     /// split atomically: the fee goes to the treasury and the net amount is credited to
@@ -310,20 +327,10 @@ impl GistVault {
 
         // Compute fee and net. Floor rounding: the remainder favors the recipient.
         let bps = Self::read_fee_bps(&env);
-        let fee: i128 = if bps > 0 {
-            if Self::read_treasury(&env).is_none() {
-                panic!("fee_bps > 0 but no treasury configured");
-            }
-            amount
-                .checked_mul(bps as i128)
-                .expect("fee calculation overflow")
-                .checked_div(BPS_DENOMINATOR)
-                .expect("fee calculation division error")
-        } else {
-            0
-        };
-
-        let net = amount.checked_sub(fee).expect("fee exceeds tip amount");
+        if bps > 0 && Self::read_treasury(&env).is_none() {
+            panic!("fee_bps > 0 but no treasury configured");
+        }
+        let (fee, net) = Self::calculate_fee_and_net(amount, bps);
 
         // Transfer gross amount from tipper into escrow.
         let token_client = token::Client::new(&env, &Self::read_token(&env));
@@ -474,17 +481,7 @@ impl GistVault {
             );
 
             // Compute fee and net (same logic as tip_author).
-            let fee: i128 = if bps > 0 {
-                amount
-                    .checked_mul(bps as i128)
-                    .expect("fee calculation overflow")
-                    .checked_div(BPS_DENOMINATOR)
-                    .expect("fee calculation division error")
-            } else {
-                0
-            };
-
-            let net = amount.checked_sub(fee).expect("fee exceeds tip amount");
+            let (fee, net) = Self::calculate_fee_and_net(amount, bps);
 
             // Route fee to treasury (only when fee > 0).
             if fee > 0 {

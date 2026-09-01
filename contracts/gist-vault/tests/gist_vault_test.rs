@@ -1401,3 +1401,63 @@ fn test_pending_balance_and_gist_total_survive_long_ledger_advance_without_resto
     assert_eq!(vault_client.get_pending_balance(&author), 100_000i128);
     assert_eq!(vault_client.get_total_tips_for_gist(&gist_id), 100_000i128);
 }
+
+#[test]
+fn test_fee_calculation_matches_between_tip_author_and_tip_authors() {
+    let (env, tipper, token_id, vault_admin, vault_client, registry_client) = setup();
+    let treasury = Address::generate(&env);
+    let author = Address::generate(&env);
+    let ipfs_cid = Bytes::from_slice(&env, b"QmTest123");
+    let geohash = String::from_str(&env, "u4pruyd");
+
+    vault_client.set_treasury(&vault_admin, &treasury);
+
+    // Helper to compare tip_author and tip_authors for the same amount/fee combination.
+    // `case_id` is used to derive distinct idempotency keys across cases.
+    let mut compare = |amount: i128, bps: u32, case_id: u8| {
+        let gist_author = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+        let gist_batch = registry_client.post_gist(&ipfs_cid, &geohash, &author, &None);
+
+        vault_client.set_fee_bps(&vault_admin, &bps);
+
+        vault_client.tip_author(
+            &tipper,
+            &author,
+            &gist_author,
+            &amount,
+            &idem_key(&env, case_id * 2 + 1),
+        );
+
+        let tips = soroban_sdk::vec![&env, batch_item(&author, gist_batch, amount)];
+        vault_client.tip_authors(&tipper, &tips, &idem_key(&env, case_id * 2 + 2));
+
+        let author_pending = vault_client.get_pending_balance(&author);
+        assert!(author_pending > 0, "pending balance must be positive for amount={amount} bps={bps}");
+
+        let token_client = token::Client::new(&env, &token_id);
+        let total_treasury = token_client.balance(&treasury);
+        let expected_fee = if bps > 0 {
+            amount
+                .checked_mul(bps as i128)
+                .unwrap()
+                .checked_div(10_000i128)
+                .unwrap()
+        } else {
+            0
+        };
+        assert_eq!(total_treasury, expected_fee * 2,
+            "treasury must collect identical fee from both paths for amount={amount} bps={bps}");
+
+        // Reset for next case.
+        vault_client.claim_tips(&author);
+    };
+
+    // Case 1: fee rounds to zero on a small amount (1 unit at 5%).
+    compare(1i128, 500u32, 0);
+
+    // Case 2: fee at the 10% cap.
+    compare(1_000_000i128, 1000u32, 1);
+
+    // Case 3: large amount near i128 practical range (still safely below overflow).
+    compare(i128::MAX / 20, 500u32, 2);
+}
