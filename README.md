@@ -52,7 +52,7 @@ own `.wasm` artifact — a single deployed Soroban contract can only export one 
 functions, so the three contracts can't share a build.
 
 ```bash
-cargo build --workspace --target wasm32v1-none --release
+cargo build --workspace --exclude reconcile-vault --target wasm32v1-none --release
 ```
 
 Compiled `.wasm` artifacts are output to `target/wasm32v1-none/release/`:
