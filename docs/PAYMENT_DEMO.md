@@ -37,7 +37,7 @@ The script is fully unattended — no prompts, no manual steps. It takes
 Compiles all three contracts to WASM and the `reconcile-vault` tool.
 
 ```bash
-cargo build --workspace --target wasm32v1-none --release
+cargo build --workspace --exclude reconcile-vault --target wasm32v1-none --release
 cargo build -p reconcile-vault
 ```
 

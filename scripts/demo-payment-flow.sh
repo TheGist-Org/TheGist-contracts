@@ -48,7 +48,7 @@ stellar network add "$NETWORK_NAME" \
 # ── Step 0: Build (always, to pick up latest contract changes) ───────────────
 step 0 "Building contracts and tools"
 cd "$ROOT_DIR"
-cargo build --workspace --target wasm32v1-none --release 2>&1 | tail -1
+cargo build --workspace --exclude reconcile-vault --target wasm32v1-none --release 2>&1 | tail -1
 cargo build -p reconcile-vault 2>&1 | tail -1
 ok "Build complete"
 
